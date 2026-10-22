@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "motion/react";
-import { Film, House, Library, MonitorPlay, Moon, Palette as PaletteIcon, Plus, Search, Settings, Wrench } from "lucide-react";
+import { FileCheck2, Film, House, Library, MonitorPlay, Moon, Palette as PaletteIcon, Plus, Search, Settings, Wrench } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { navigate } from "@/lib/router";
@@ -32,6 +32,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
       { id: "home", label: "Home", icon: House, run: go("/") },
       { id: "videos", label: "Videos", icon: Film, run: go("/videos") },
       { id: "demos", label: "Demos", hint: "Claude records a site", icon: MonitorPlay, run: go("/demos") },
+      { id: "scripts", label: "Check a script's facts", hint: "Scripts", icon: FileCheck2, run: go("/scripts") },
       { id: "styles", label: "Styles", icon: PaletteIcon, run: go("/styles") },
       { id: "library", label: "Library", icon: Library, run: go("/library") },
       { id: "settings", label: "Settings", icon: Settings, run: go("/settings") },

@@ -31,8 +31,8 @@ bin/mm          # starts the studio and opens it: http://localhost:5199
 bin/mm app      # optional: motionmaxxing.app in ~/Applications, for the Dock
 ```
 
-The first run checks the Mac and installs what is missing in one click (ffmpeg, whisper.cpp, the editing tools and
-the transcription model). Then drop a raw take on Home.
+The first run checks the Mac and installs what is missing in one click (ffmpeg, whisper.cpp, the editing tools, the
+transcription model, the renderer, the motion clip tools and the face and cutout models). Then drop a raw take on Home.
 
 The studio:
 
@@ -40,9 +40,16 @@ The studio:
 - **The editor**: the video in the middle, the transcript on the left with every cut word struck through (select
   words to cut them or bring them back), Claude, your notes and the facts on the right, the timeline below. Notes are
   pinned to a moment and go to Claude together. Claude's questions show up as cards.
+- **Approve the cut** and Claude makes the edit on top, in your measured style (a creator teardown of your own
+  reels): captions, face zooms, real captures with the line marked, posts, logos, demo recordings, free stock
+  b-roll and a motion graphic per beat, each placed behind you, on half the screen, in a small box or full screen.
+  The timeline shows every visual by placement, the captions, zooms and sound. **Export** writes Final Cut,
+  Premiere, Resolve, EDL, SRT, the CapCut steps and a handoff folder for an editor.
 - **Demos**: a site and a sentence ("ask Claude for a meal plan and show the answer arriving"). Claude drives the
   site in its own browser and records it; the waiting plays fast, the camera follows each click, personal data is
   blurred. Wide and vertical.
+- **Scripts**: paste a script before you record; Claude checks every number, name and step against sources found
+  today and suggests fixes in your words.
 - **Styles**, **Library**, **Settings**. ⌘K finds anything, ⌘B folds the sidebar, ⌘/ shows or hides Claude.
 - On a phone: watch, leave notes and approve.
 

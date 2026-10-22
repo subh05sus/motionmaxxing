@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "motion/react";
-import { Command, Film, House, Library, MonitorPlay, Palette, PanelLeft, PanelRight, Plus, Search, Settings } from "lucide-react";
+import { Command, FileCheck2, Film, House, Library, MonitorPlay, Palette, PanelLeft, PanelRight, Plus, Search, Settings } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ChatPanel } from "@/components/chat";
 import { Palette as CommandPalette } from "@/components/palette";
@@ -13,6 +13,8 @@ import { DemosPage } from "@/pages/demos";
 import { EditorPage } from "@/pages/editor";
 import { HomePage } from "@/pages/home";
 import { LibraryPage } from "@/pages/library";
+import { ScriptPage } from "@/pages/script";
+import { ScriptsPage } from "@/pages/scripts";
 import { NewVideoPage } from "@/pages/new-video";
 import { SettingsPage } from "@/pages/settings";
 import { SetupPage } from "@/pages/setup";
@@ -24,6 +26,7 @@ const NAV = [
   { href: "/new", label: "New video", icon: Plus },
   { href: "/videos", label: "Videos", icon: Film },
   { href: "/demos", label: "Demos", icon: MonitorPlay },
+  { href: "/scripts", label: "Scripts", icon: FileCheck2 },
   { href: "/styles", label: "Styles", icon: Palette },
   { href: "/library", label: "Library", icon: Library },
 ];
@@ -76,12 +79,14 @@ export function App() {
   else if (route.parts[0] === "videos") body = <VideosPage setTitle={setTitle} />;
   else if (route.parts[0] === "demos" && route.parts[1]) body = <DemoPage id={route.parts[1]} setTitle={setTitle} chatOpen={chat} />;
   else if (route.parts[0] === "demos") body = <DemosPage setTitle={setTitle} />;
+  else if (route.parts[0] === "scripts" && route.parts[1]) body = <ScriptPage id={route.parts[1]} setTitle={setTitle} chatOpen={chat} />;
+  else if (route.parts[0] === "scripts") body = <ScriptsPage setTitle={setTitle} />;
   else if (route.parts[0] === "styles") body = <StylesPage setTitle={setTitle} />;
   else if (route.parts[0] === "library") body = <LibraryPage setTitle={setTitle} />;
   else if (route.parts[0] === "settings") body = <SettingsPage setTitle={setTitle} />;
   else body = <HomePage setTitle={setTitle} />;
   void page;
-  const inEditor = (route.parts[0] === "videos" || route.parts[0] === "demos") && !!route.parts[1];
+  const inEditor = ["videos", "demos", "scripts"].includes(route.parts[0] ?? "") && !!route.parts[1];
 
   return (
     <div className="flex h-full bg-background">

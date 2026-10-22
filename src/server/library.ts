@@ -51,7 +51,17 @@ export function newEdit(title: string, source: string): string {
 export function lastProgress(id: string): { step: string; detail?: string; progress?: number; t: number; done?: boolean; failed?: string } | undefined {
   try {
     const lines = readFileSync(path.join(editDir(id), "progress.jsonl"), "utf8").trim().split("\n");
-    return JSON.parse(lines[lines.length - 1]!);
+    const last = JSON.parse(lines[lines.length - 1]!);
+    // The render reports its log file; its newest "Rendered 312/2196" line is the bar.
+    if (last.step === "Making the video" && /\.log$/.test(last.detail ?? "")) {
+      try {
+        const tail = readFileSync(path.join(editDir(id), path.basename(last.detail)), "utf8").slice(-4000);
+        const m = [...tail.matchAll(/Rendered (\d+)\/(\d+)/g)].pop();
+        if (m) return { ...last, detail: `${m[1]} of ${m[2]} frames`, progress: Number(m[1]) / Number(m[2]) };
+      } catch { /* not started yet */ }
+      return { ...last, detail: undefined };
+    }
+    return last;
   } catch { return undefined; }
 }
 

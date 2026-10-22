@@ -47,10 +47,13 @@ export function useSession(sid: string | null) {
 /** Plain text with **bold**, `code`, bullet lines and paragraphs: enough for Claude's replies. */
 export function Prose({ text }: { text: string }) {
   const blocks = text.trim().split(/\n{2,}/);
-  const inline = (s: string): ReactNode[] => s.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((p, i) =>
-    p.startsWith("**") ? <strong key={i} className="font-semibold">{p.slice(2, -2)}</strong>
-      : p.startsWith("`") ? <code key={i} className="rounded bg-foreground/8 px-1 py-px font-mono text-[11.5px]">{p.slice(1, -1)}</code>
-        : <span key={i}>{p}</span>);
+  const inline = (s: string): ReactNode[] => s.split(/(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)\s]+\))/g).map((p, i) => {
+    if (p.startsWith("**")) return <strong key={i} className="font-semibold">{p.slice(2, -2)}</strong>;
+    if (p.startsWith("`")) return <code key={i} className="rounded bg-foreground/8 px-1 py-px font-mono text-[11.5px]">{p.slice(1, -1)}</code>;
+    const link = /^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/.exec(p);
+    if (link) return <a key={i} href={link[2]} target="_blank" rel="noreferrer" className="text-primary hover:underline">{link[1]}</a>;
+    return <span key={i}>{p}</span>;
+  });
   return (
     <div className="space-y-2 text-[13px] leading-[18px]">
       {blocks.map((b, i) => {
@@ -58,6 +61,19 @@ export function Prose({ text }: { text: string }) {
         if (lines.every((l) => /^\s*([-*•]|\d+\.)\s/.test(l))) {
           return <ul key={i} className="space-y-1 pl-4">{lines.map((l, j) => <li key={j} className="list-disc marker:text-faint-foreground">{inline(l.replace(/^\s*([-*•]|\d+\.)\s/, ""))}</li>)}</ul>;
         }
+        if (lines.length > 1 && lines.every((l) => l.trim().startsWith("|"))) {
+          const cells = (l: string) => l.trim().replace(/^\||\|$/g, "").split("|").map((x) => x.trim());
+          const rows = lines.filter((l) => !/^\s*\|[\s:|-]+\|\s*$/.test(l)).map(cells);
+          return (
+            <div key={i} className="overflow-x-auto rounded-lg border">
+              <table className="w-full text-left text-[12px] leading-[16px]">
+                <thead className="bg-foreground/5"><tr>{rows[0]!.map((h, j) => <th key={j} className="px-2 py-1.5 font-semibold">{inline(h)}</th>)}</tr></thead>
+                <tbody className="divide-y">{rows.slice(1).map((r, k) => <tr key={k}>{r.map((x, j) => <td key={j} className="px-2 py-1.5 align-top">{inline(x)}</td>)}</tr>)}</tbody>
+              </table>
+            </div>
+          );
+        }
+        if (/^#\s/.test(b)) return <p key={i} className="title-2">{inline(b.replace(/^#\s/, ""))}</p>;
         if (/^#{1,3}\s/.test(b)) return <p key={i} className="headline">{inline(b.replace(/^#{1,3}\s/, ""))}</p>;
         if (b.startsWith(">")) return <blockquote key={i} className="border-l-2 border-primary/50 pl-3 text-muted-foreground">{inline(b.replace(/^>\s?/gm, ""))}</blockquote>;
         return <p key={i} className="whitespace-pre-wrap">{lines.map((l, j) => <span key={j}>{j > 0 && <br />}{inline(l)}</span>)}</p>;

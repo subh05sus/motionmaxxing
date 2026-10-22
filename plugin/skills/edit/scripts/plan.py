@@ -1121,7 +1121,7 @@ def _place(images, words, duration, hold, ent, box, aspect):
         card = {"src": im["src"]} if "src" in im else {"anim": im["anim"]}
         if im.get("lane"):
             card["lane"] = im["lane"]
-        for k in ("highlight", "size", "layout", "transition_in", "transition_out", "focus", "format", "props", "_own_box", "xh", "lines", "pics",
+        for k in ("highlight", "size", "layout", "layer", "transition_in", "transition_out", "focus", "format", "props", "_own_box", "xh", "lines", "pics",
                   "heading"):
             if im.get(k):
                 card[k] = im[k]

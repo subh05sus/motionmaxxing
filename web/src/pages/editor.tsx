@@ -236,6 +236,19 @@ function Inspector({ v }: { v: Detail }) {
   return (
     <div className="space-y-4 overflow-y-auto p-3">
       <div className="panel divide-y overflow-hidden">{rows.map(([k, val]) => <div key={k} className="row justify-between px-3"><span className="label-2">{k}</span><span className="tabular">{val}</span></div>)}</div>
+      {v.plan && (
+        <div><p className="mb-1 px-1 caption uppercase tracking-wide">The edit</p>
+          <div className="panel divide-y overflow-hidden">
+            {(Object.keys(PLACE) as (keyof typeof PLACE)[]).map((k) => {
+              const n = v.plan!.cards.filter((c) => c.place === k).length;
+              return <div key={k} className="row justify-between px-3"><span className="flex items-center gap-2"><span className={cn("size-2.5 rounded-sm", PLACE[k].cls)} />{PLACE[k].label}</span><span className="label-2 tabular">{n}</span></div>;
+            })}
+            <div className="row justify-between px-3"><span>Captions</span><span className="label-2 tabular">{v.plan.captions.length}</span></div>
+            <div className="row justify-between px-3"><span>Zooms</span><span className="label-2 tabular">{v.plan.zooms.length}</span></div>
+            <div className="row justify-between px-3"><span>Sound cues</span><span className="label-2 tabular">{v.plan.sounds.length}{v.plan.music ? " + music" : ""}</span></div>
+          </div>
+        </div>
+      )}
       {Object.keys(counts).length > 0 && (
         <div><p className="mb-1 px-1 caption uppercase tracking-wide">What went</p>
           <div className="panel divide-y overflow-hidden">{Object.entries(counts).map(([k, n]) => <div key={k} className="row justify-between px-3"><span>{KIND[k] ?? k}</span><span className="label-2 tabular">{n}</span></div>)}</div>

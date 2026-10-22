@@ -6,6 +6,7 @@ import { randomBytes } from "node:crypto";
 import { Claude, type Ev, type SessionMeta } from "./claude.js";
 import * as demos from "./demos.js";
 import * as lib from "./library.js";
+import * as scripts from "./scripts.js";
 import { CUT, EDITS, HOME, LIBRARY, PLUGIN, PORT, RECORDINGS, SETUP, VIDEOS, WEB_DIST, ensureDirs, python, slug } from "./paths.js";
 
 /**
@@ -367,6 +368,26 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/chats") return sendJson(res, 200, claude.list());
 
+    // Scripts: pasted to check their facts before recording.
+    if (p === "/api/scripts" && m === "GET") return sendJson(res, 200, scripts.list());
+    if (p === "/api/scripts" && m === "POST") {
+      const b = await body(req);
+      const text = String(b.text ?? "").trim();
+      if (text.length < 20) return sendJson(res, 400, { error: "paste the script first" });
+      const id = scripts.newScript(text, b.title);
+      const sid = `s_${id}`;
+      const mt = scripts.meta(id); mt.session = sid; scripts.saveMeta(id, mt);
+      claude.ensure(sid, mt.title, scripts.scriptDir(id));
+      claude.send(sid, "Check the facts in this script.", scripts.prompt(id));
+      broadcast("script", { id });
+      return sendJson(res, 201, { id, session: sid });
+    }
+    if (seg[0] === "api" && seg[1] === "scripts" && seg[2] && m === "GET") {
+      if (!existsSync(scripts.scriptDir(seg[2]))) return sendJson(res, 404, { error: "no such script" });
+      const d = scripts.detail(seg[2]), c = d.session ? claude.get(d.session) : undefined;
+      return sendJson(res, 200, { ...d, chat: c ? { id: c.id, status: c.status } : null });
+    }
+
     // Demo recordings: Claude drives a site in its own browser, the record skill finishes the video.
     if (p === "/api/demos" && m === "GET") return sendJson(res, 200, demos.list());
     if (p === "/api/demos" && m === "POST") {
@@ -510,6 +531,11 @@ try {
     if (!id || id.startsWith(".") || String(f).includes(`${path.sep}frames${path.sep}`)) return;
     clearTimeout(pendingDemo.get(id));
     pendingDemo.set(id, setTimeout(() => broadcast("demo", { id }), 300));
+  });
+  mkdirSync(scripts.SCRIPTS, { recursive: true });
+  watch(scripts.SCRIPTS, { recursive: true }, (_ev, f) => {
+    const id = String(f ?? "").split(path.sep)[0];
+    if (id && !id.startsWith(".")) broadcast("script", { id });
   });
   const prog = path.join(HOME, "progress");
   mkdirSync(prog, { recursive: true });

@@ -1,4 +1,4 @@
-import { ChevronRight, FileText, Film, Loader2, Sparkles } from "lucide-react";
+import { ChevronRight, FileCheck2, FileText, Film, Loader2, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { DropZone } from "@/components/drop-zone";
 import type { VideoSummary } from "@/components/video-card";
@@ -47,6 +47,10 @@ export function NewVideoPage({ setTitle }: PageProps) {
           <label className="flex items-center gap-1.5 headline"><FileText className="size-3.5 text-muted-foreground" />Script <span className="caption font-normal">optional</span></label>
           <textarea value={script} onChange={(e) => setScript(e.target.value)} rows={5} placeholder="Paste the script: it helps Claude match each take to its line and spell names right."
             className="w-full resize-y rounded-[10px] bg-input p-2.5 leading-[18px] outline-none placeholder:text-faint-foreground focus:ring-2 focus:ring-primary/40" />
+          {script.trim().length >= 20 && (
+            <button onClick={async () => { const r = await api<{ id: string }>("/api/scripts", { json: { text: script } }); window.open(`/scripts/${encodeURIComponent(r.id)}`, "_blank"); }}
+              className="flex items-center gap-1 text-[12px] text-primary hover:underline"><FileCheck2 className="size-3.5" />Check the facts first</button>
+          )}
         </div>
         <div className="mt-4 space-y-1.5">
           <label className="flex items-center gap-1.5 headline"><Sparkles className="size-3.5 text-muted-foreground" />Anything Claude should know <span className="caption font-normal">optional</span></label>
