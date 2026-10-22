@@ -172,7 +172,9 @@ The `cut-judge` agent grades `paper-edit.md` (a flub left in, a bad join, a good
 fixes `spans.json`. Readers for takes over 5 min
 go first, the judge after: `references/judge.md`. Never read `paper-edit.md` yourself.
 - `CLIPPED` in `paper-edit.md`: a pause cut ate a word. Raise `--pad`. Still there: a label is off.
-- Joins inside speech move to a quiet frame. Any `still in speech`: listen in step 5.
+- Joins inside speech move to a quiet frame (with none in reach, to one 6 dB quieter), and a piece that ends on a
+  sound still ringing rings out to one (at most 0.15 s); the video's last word rings out up to the next sound.
+  Any `still in speech`: listen in step 5. They are placed by the build: never move a join by hand in `keep.json`.
 
 ## 4-5. Render and verify
 

@@ -243,6 +243,25 @@ def audible_start(lvl, noise_db, t, limit):
     return None if i >= end else max(t, i * RMS_WIN_S - ONSET_MARGIN_S)
 
 
+NEXT_GAP_S = 0.1   # quiet this long ends a sound; a shorter one is a stop's closure inside the word ("-nachrich-t")
+
+
+def next_sound(lvl, noise_db, t, limit):
+    """When the next sound starts after t (the first audible window after NEXT_GAP_S of quiet, less ONSET_MARGIN_S,
+    as a soft onset starts under the line), or None before limit. The last word's end tail stops there: a cut take's
+    "Sch-" 0.1 s before its label rang on at the end of a video."""
+    i, end = max(0, int(t / RMS_WIN_S)), min(len(lvl), int(limit / RMS_WIN_S) + 1)
+    while i < end:
+        while i < end and lvl[i] > noise_db:
+            i += 1
+        q = i
+        while i < end and lvl[i] <= noise_db:
+            i += 1
+        if i < end and (i - q) * RMS_WIN_S >= NEXT_GAP_S - 1e-9:
+            return max(t, i * RMS_WIN_S - ONSET_MARGIN_S)
+    return None
+
+
 # A label far longer than the word can be said in (over 2.5x a speech-rate length and 0.4 s more) is a
 # transcriber artefact: Whisper times a 0.15 s "if" at 0.7 s, or folds a 3 s pause into an "I". Judged
 # on that label, a pause cut "clips" a word the render still plays, and the cut is rebuilt for nothing. So such a label is fitted to where the
@@ -333,8 +352,16 @@ def derive_noise_db(lvl):
     diag = {"speech": float(speech), "floor": float(floor), "sep": float(sep)}
     if sep < MIN_SEPARATION_DB:
         bed = srt[int(BED_PERCENTILE * (len(srt) - 1))]
-        diag.update(bed=round(bed, 1), noise=round(bed + (speech - bed) / 3, 1))
-        return diag["noise"], diag
+        if bed >= speech - MIN_SEPARATION_DB:
+            diag.update(bed=round(bed, 1), noise=round(bed + (speech - bed) / 3, 1))
+            return diag["noise"], diag
+        # the quietest tenth is silence far under the speech: a take that talks almost without a break, whose
+        # commonest level under the speech is its quieter speech (silence spread thin over many levels never wins
+        # the count), not a bed. Its floor is the commonest level down there. (A 44 s slice of a take read as a
+        # bed: its joins went by the word labels and one ended in the ringing "l" of a "Schreibstil".)
+        floor = max((b for b in hist if b < speech - MIN_SEPARATION_DB), key=lambda b: hist[b])
+        sep = speech - floor
+        diag.update(floor=float(floor), sep=float(sep))
     diag["noise"] = noise = max(speech - SPEECH_OFFSET_DB, floor + FLOOR_HEADROOM_DB)
     return noise, diag
 
@@ -569,6 +596,12 @@ def kept_frames(cuts, fps, dur, total=None, words=()):
 
 # --- 6. splices against the audio ---------------------------------------------
 SPLICE_REACH_S = 0.6     # how far an edge may move to find a quiet frame
+TROUGH_DB = 6.0          # no quiet frame within reach (the next take starts at once): the nearest frame this much
+                         # quieter than the edge (a "Schreibstil" whose "l" was still ringing when the cut came)
+RING_DB = 6.0            # a kept piece that ends while its last sound still rings this far over the silence line...
+RING_S = 0.15            # ...rings out to the first quiet (or TROUGH_DB quieter) frame within this. Word end labels
+                         # come early on soft endings: 10 of 19 ends of a cut stopped on a ringing sound, 1-2 frames
+                         # before it died away
 LOUD_OVER_DB = 10.0      # speech: this far over the silence threshold
 
 
@@ -578,9 +611,17 @@ def in_speech(lvl, t, quiet_db):
     return 0 < w < len(lvl) and min(lvl[w - 1], lvl[w]) > quiet_db + LOUD_OVER_DB
 
 
+def ringing(lvl, t, quiet_db):
+    """One of the 20 ms windows either side of t still sounds RING_DB over the silence line."""
+    w = int(t / RMS_WIN_S)
+    return 0 < w < len(lvl) and max(lvl[w - 1], lvl[w]) > quiet_db + RING_DB
+
+
 def fix_splices(frames, fps, lvl, quiet_db, total, removed=(), reach_s=SPLICE_REACH_S):
     """Move each kept edge that lands inside speech out into its removed side, to the first frame
-    with a quiet window next to it (at most reach_s, never into a removed word's label).
+    with a quiet window next to it (at most reach_s, never into a removed word's label); with none, to the first
+    frame TROUGH_DB quieter than the edge. A kept piece's end that is no longer speech but still rings rings out
+    the same way, at most RING_S, and never leaves the cut after it shorter than MIN_TRIM_S.
     removed: [(start, end)] of the words the cut removes on purpose. total: the source's frame count.
     Returns (frames, moved [(old_s, new_s)], left [edge_s]): left are edges no quiet frame could fix."""
     frames = [list(f) for f in frames]
@@ -590,24 +631,41 @@ def fix_splices(frames, fps, lvl, quiet_db, total, removed=(), reach_s=SPLICE_RE
         w = int(g / fps / RMS_WIN_S)
         return min(lvl[max(0, w - 1):w + 1] or [0.0]) <= quiet_db
 
+    def loud(g):   # the louder of the two windows either side of frame g
+        w = int(g / fps / RMS_WIN_S)
+        return max(lvl[max(0, w - 1):w + 1] or [0.0])
+
     moved, left = [], []
     for k, fr in enumerate(frames):
         for side in (0, 1):    # 0: the keep's start (walk back), 1: its end (walk on)
             f = fr[side]
             t = f / fps
-            if f == (0 if side == 0 else total) or not in_speech(lvl, t, quiet_db):
+            if f == (0 if side == 0 else total):
                 continue
+            speech = in_speech(lvl, t, quiet_db)
+            ring = side == 1 and not speech and ringing(lvl, t, quiet_db)
+            if not (speech or ring):
+                continue
+            # walk: as far as the edge may go. soft: the same, but the cut beside it stays a trim worth making; the
+            # fallbacks (a quieter frame, a ring-out) never join two pieces, only true silence does
+            trim = math.ceil(MIN_TRIM_S * fps)
             if side == 0:
-                lo = max([frames[k - 1][1] if k else 0, f - reach]
-                         + [math.ceil(min(e, t) * fps) for s, e in removed if s < t])
-                to = next((g for g in range(f, lo - 1, -1) if quiet(g)), None)
+                prev = frames[k - 1][1] if k else 0
+                lo = max([prev, f - reach] + [math.ceil(min(e, t) * fps) for s, e in removed if s < t])
+                walk = range(f, lo - 1, -1)
+                soft = range(f, max(lo, prev + trim if k else lo) - 1, -1)
             else:
-                hi = min([frames[k + 1][0] if k + 1 < len(frames) else total, f + reach]
+                nxt = frames[k + 1][0] if k + 1 < len(frames) else total
+                hi = min([nxt, f + (min(reach, round(RING_S * fps)) if ring else reach)]
                          + [math.floor(max(s, t) * fps) for s, e in removed if e > t])
-                to = next((g for g in range(f, hi + 1) if quiet(g)), None)
+                walk = range(f, hi + 1)
+                soft = range(f, min(hi, nxt - trim if k + 1 < len(frames) else hi) + 1)
+            to = next((g for g in (soft if ring else walk) if quiet(g)), None)
             if to is None:
-                left.append(round(t, 2))
-            else:
+                to = next((g for g in soft if loud(g) <= loud(f) - TROUGH_DB), None)
+                if speech and (to is None or in_speech(lvl, to / fps, quiet_db)):
+                    left.append(round(t, 2))   # still worth a listen
+            if to is not None and to != f:
                 fr[side] = to
                 moved.append((round(t, 2), round(to / fps, 2)))
     out = []
@@ -788,9 +846,11 @@ def main():
     if restored:
         print(f"pieces     {len(restored)} pause(s) left in, so no kept piece is under {MIN_PIECE_S:.2f}s: "
               + ", ".join(f"{a_:.2f}-{b_:.2f}s" for a_, b_ in restored[:6]))
-    if kept_words and allcuts and allcuts[-1]["end"] >= dur:   # let the last word ring out
+    if kept_words and allcuts and allcuts[-1]["end"] >= dur:   # let the last word ring out, up to the next sound
         last = max(w["end"] for w in kept_words)
-        allcuts[-1]["start"] = max(allcuts[-1]["start"], min(dur, last + END_TAIL_S))
+        ring = min(dur, last + END_TAIL_S)
+        on = next_sound(lvl, splice_noise, last, ring) if splice_noise is not None else None
+        allcuts[-1]["start"] = max(allcuts[-1]["start"], ring if on is None else min(ring, on))
     frames = kept_frames(allcuts, fps, dur, nframes, kept_words)
     moved, left = [], []
     if splice_noise is not None:
@@ -816,7 +876,8 @@ def main():
         if inside:
             last = max(w["end"] for w in inside)
             nxt = min([t["start"] for t in toks if t["start"] >= last + 0.01], default=dur)
-            frames[-1][1] = max(e_, min(nframes, math.ceil(min(last + END_TAIL_S, nxt - 0.05, dur) * fps)))
+            on = next_sound(lvl, splice_noise, last, nxt) if splice_noise is not None else None
+            frames[-1][1] = max(e_, min(nframes, math.ceil(min(last + END_TAIL_S, nxt - 0.05, dur, on or dur) * fps)))
     # A kept piece of 3 frames or less is never a word, whatever the labels say (Whisper squeezes a fast run of words
     # into a frame or two): played, it is a click or half a syllable at a join. Dropped, after the joins have moved.
     slivers = [(s_ / fps, e_ / fps) for s_, e_ in frames if e_ - s_ <= SLIVER_FRAMES]
@@ -835,7 +896,7 @@ def main():
     if gaps:
         print(f"splices    median {gaps[len(gaps) // 2]:.3f}s  max {gaps[-1]:.3f}s")
     if splice_noise is not None:
-        print(f"speech     {len(moved)} join(s) moved off speech to a quiet frame"
+        print(f"speech     {len(moved)} join(s) moved off speech or a ringing end to a quiet frame"
               + "".join(f" ({a:.2f}->{b:.2f}s)" for a, b in moved[:5]) + f"; {len(left)} still in speech"
               + (": " + ", ".join(f"{t:.2f}s" for t in left[:8]) + " (listen to these joins)" if left else ""))
     for c in model_cuts:

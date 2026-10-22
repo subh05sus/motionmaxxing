@@ -7,7 +7,8 @@
 Reads report.json (build_timeline.py) and the source's audio. A kept edge is in speech when the 20 ms
 windows either side of it are 10 dB over the take's silence threshold (build_timeline.in_speech, the
 same measure the build uses). --fix moves each one into its removed side, to the nearest quiet window
-within --reach seconds, never into a removed word (build_timeline.fix_splices), then rewrites
+within --reach seconds (with none, the nearest frame 6 dB quieter), never into a removed word
+(build_timeline.fix_splices), then rewrites
 decisions.json, report.json, words.json, paper-edit.md and cut-check.html. Render again after a fix.
 
 The build already moves edges up to 0.6 s on a take without music; this catches what is left: joins over
@@ -81,6 +82,21 @@ def demo():
     _, moved, left = B.fix_splices(frames, fps, lvl, -50.0, total)    # the build's 0.6 s reaches both
     assert moved == [(1.52, 1.6), (2.2, 1.68)] and not left, (moved, left)
     assert edges_in_speech([[0, 40], [42, 75]], fps, lvl, -50.0, total) == []
+    # no silence at all between a kept word and the next take: its tail rings at -29 dB, a -36 dB trough
+    # before the next take at 1.64 s. The end moves to the trough, not past the removed word's label.
+    lvl = [-20.0] * 70 + [-29.0] * 8 + [-36.0] * 4 + [-20.0] * 68
+    out, moved, left = B.fix_splices([[0, 37], [55, 75]], fps, lvl, -40.0, total, [(1.66, 2.1)], REACH_S)
+    assert moved == [(1.48, 1.6)] and left == [2.2] and out == [[0, 40], [55, 75]], (out, moved, left)   # 2.2: speech
+    _, moved, left = B.fix_splices([[0, 37], [55, 75]], fps, lvl, -40.0, total, [(1.58, 2.1)], REACH_S)
+    assert not moved and left == [1.48, 2.2], (moved, left)    # the trough is inside the removed word: stays, listen
+    # an end that is no longer speech but still rings (-32 dB, 8 dB over the line): it rings out to the trough
+    lvl = [-20.0] * 60 + [-32.0] * 18 + [-39.0] * 4 + [-20.0] * 68
+    out, moved, left = B.fix_splices([[0, 37], [55, 75]], fps, lvl, -40.0, total, [(1.66, 2.1)], REACH_S)
+    assert moved == [(1.48, 1.6)] and left == [2.2] and out == [[0, 40], [55, 75]], (out, moved, left)
+    # ...never so far that the cut after it is shorter than a trim worth making; the next piece's start, in
+    # speech, goes back to the trough, and the two never meet
+    out, moved, left = B.fix_splices([[0, 37], [42, 75]], fps, lvl, -40.0, total, (), REACH_S)
+    assert moved == [(1.68, 1.6)] and not left and out == [[0, 37], [40, 75]], (out, moved, left)
     print("splice_check demo ok")
 
 

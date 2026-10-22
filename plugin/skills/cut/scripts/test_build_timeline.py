@@ -25,6 +25,19 @@ def test_derive():
     noise, d = B.derive_noise_db(levels(-13, -28, n_speech=50, n_floor=4000))
     assert d["speech"] == -13 and d["bed"] == -27.6, d           # busy floor is not speech
     assert B.derive_noise_db(levels(-11, -38))[0] == -32.0      # never under floor + 6
+    # a take that talks almost without a break: its commonest level under the speech is quieter speech (-21), the
+    # silence is spread thin over many levels; the quietest tenth is silence, so it is no bed
+    lv = [-9.6] * 300 + [-20.6] * 400 + [b + 0.4 for b in range(-60, -44) for _ in range(20)] + [-51.6] * 20
+    noise, d = B.derive_noise_db(lv)
+    assert "bed" not in d and d["floor"] == -52 and noise == -36.0, d
+
+
+def test_next_sound():
+    # 20 ms windows from 0: the word to 0.1 s, a 40 ms stop closure, its "-t" burst, 0.36 s of quiet, the next take
+    lv = [-15.0] * 5 + [-50.0] * 2 + [-25.0] * 2 + [-50.0] * 18 + [-20.0] * 10
+    assert abs(B.next_sound(lv, -36.0, 0.08, 1.0) - (0.54 - B.ONSET_MARGIN_S)) < 1e-9   # not the burst after the closure
+    assert B.next_sound(lv, -36.0, 0.08, 0.5) is None                                       # nothing before the limit
+    assert B.next_sound([-15.0] * 50, -36.0, 0.1, 0.9) is None                              # it never goes quiet
 
 
 def test_audible_end():
@@ -249,6 +262,7 @@ def test_move_before():
 
 if __name__ == "__main__":
     test_derive()
+    test_next_sound()
     test_audible_end()
     test_splice_budget()
     test_spans()

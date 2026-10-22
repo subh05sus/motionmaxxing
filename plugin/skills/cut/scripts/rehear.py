@@ -275,9 +275,10 @@ def plan(pieces, units, heard, firsts, lasts):
             while t < len(us) - 1 and not fragment(us[t + 1]):
                 t += 1
         if t < len(us) - 1:
-            ne = min(e, us[t][1] + PAD_AFTER_S)
+            last = i == len(pieces) - 1   # the video's last word rings out as the build lets it, up to what goes
+            ne = min(e, us[t][1] + (B.END_TAIL_S if last else PAD_AFTER_S))
             if fragment(us[t + 1]):
-                ne = min(ne, us[t + 1][0] - 0.01)
+                ne = min(ne, max(us[t][1] + PAD_AFTER_S, us[t + 1][0] - PAD_BEFORE_S) if last else us[t + 1][0] - 0.01)
         lines[i] = (us[h], us[t])
         if ns > s + 0.005:
             cuts.append({"start": round(s, 3), "end": round(ns, 3), "why": "; ".join(why_h.values())})
@@ -494,6 +495,14 @@ def demo():
                      {(201.88, 202.77): "So you have in no time your", (202.87, 204.9): "own assistant, who"},
                      ["so", "own"], ["your", "who"])
     assert new == [(201.88, 202.77), (202.87, 205.0)] and not cuts, (new, cuts)
+    # the video's last piece: a mouth sound heard as "Thank you." and the next take's "Sch-" go, the last word rings
+    # out to just before them (not 0.06 s after it); the same piece inside the video keeps its tight join
+    us = [(40.44, 43.10, "", S), (43.30, 43.40, "", S), (43.50, 43.533, "", S)]
+    hd = {(40.44, 43.10): "sogar per Sprachnachricht.", (43.30, 43.40): "Thank you."}
+    new, cuts, _ = plan([(39.533, 43.533)], [us], hd, ["sogar"], ["sprachnachricht"])
+    assert new[0][0] == 39.533 and abs(new[0][1] - 43.24) < 1e-9 and len(cuts) == 1, (new, cuts)
+    new, cuts, _ = plan([(39.533, 43.533), (50.0, 52.0)], [us, []], hd, ["sogar", None], ["sprachnachricht", None])
+    assert abs(new[0][1] - 43.16) < 1e-9, (new, cuts)
     raw = [{"text": "So", "start": 42.30, "end": 42.34, "type": "word"}, {"text": "build", "start": 42.34, "end": 42.44, "type": "word"},
            {"text": "you", "start": 42.47, "end": 42.56, "type": "word"}, {"text": "imagine,", "start": 309.65, "end": 309.75, "type": "word"},
            {"text": "How", "start": 309.77, "end": 309.94, "type": "word"}, {"text": "you", "start": 309.95, "end": 310.06, "type": "word"},
