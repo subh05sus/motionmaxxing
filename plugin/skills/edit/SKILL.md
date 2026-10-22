@@ -106,7 +106,7 @@ edited; a small box is the quiet one:
 | placement | write | fits |
 |---|---|---|
 | behind the speaker, background removed | `"layout": "background"` | the speaker cut out (matte.py) in front of a picture or clip filling the frame: b-roll, a product, a page, a place. The host stays on screen |
-| half the screen (9:16) | `"layout": "split"` | a page or app to read, a chart, steps: the visual on top, the speaker in the window below. Only these beats open the panel |
+| half the screen (9:16) | `"layout": "split"` | a page or app to read, a chart, steps: the visual on top, the speaker below. The speaker stays where the camera has him (the panel covers the top half, the seam crosses his hair, as creators' editors do): his face never jumps and his captions stay put. Only these beats open the panel |
 | the whole screen | `"layout": "scene"` | a motion graphic, a demo recording, a b-roll cut-away (1.5-4 s) |
 | the clip alone, full screen (a kit clip) | `"layout": "background", "cutaway": true` | a phone moment (a lock screen, a call): no cutout, about 2 s or more |
 | a small box | nothing (the default), or `"box": [x, y, w, h]` in % | a logo, a post, a detail; above the head |
@@ -116,9 +116,13 @@ Rules: at most 40% of the visuals in a small box (logos apart); check.py plan FA
 one half-screen beat in a video with four or more visuals, when the line fits. Never the same placement more than
 three beats in a row; the face comes back at least every 8 s (half-screen kit clips keep it in the window below).
 Not too fast: never more than three layout changes in ten seconds. After a background beat (or a tucked card) is planned,
-run `matte.py` (it cuts only new frames). Captions: plan.py puts them under the chin, or over the head when the chin is
-too low for the app's bottom UI, always inside the safe zone; never set `captions.y_pct` by hand (check.py plan FAILs
-captions on the face or under the app's UI).
+run `matte.py` (it cuts only new frames). Captions sit where the creator sets them, on the chin just under the mouth
+(the owner's editor: 75-78.5% down, the mouth line at 72), the same in every layout: plan.py keeps the style's height
+when its ink clears the lip line (face.json keeps the mouth line), moves a line that would cover the mouth under it,
+and over the head only when there is no room under it above the app's caption and name (80%). Zooms grow from the lip
+line, so a punch never pushes the mouth into them. Never set `captions.y_pct` by hand (check.py plan FAILs captions
+over the mouth or under the app's UI; a few pages touching the mouth line while the speaker leans in is a WARN, as in
+the creator's own edits).
 
 **Real things, in this order:** the user's own image or clip; a capture of the real page with the line marked
 (`capture`); an X post (`post`); a Reddit thread or a news article (a `capture:browser` of the page with `marks` on

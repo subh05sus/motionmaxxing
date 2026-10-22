@@ -165,7 +165,6 @@ export const zoomAt = (t: number, zooms: Zoom[]): { k: number; origin: string } 
   }
   return { k: 1, origin: ZOOM_ORIGIN };
 };
-const zoomScale = (t: number, zooms: Zoom[]) => zoomAt(t, zooms).k;
 
 /** The footage's pan offset (% of the width) and the scale that keeps its edge out of frame. */
 const panAt = (t: number, pans: Pan[] = []) => {
@@ -485,6 +484,10 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
   // to cover it, one move on one curve. The video inside moves with it so the head stays framed.
   const cardViews = up.filter((s) => s.card.layout !== "scene" && s.card.layer !== "behind" && s.card.layout !== "background").map(view);
   const { scale, x, y, origin } = layout.speaker;
+  // a zoom grows from its own origin (plan.py clear_mouth puts it on the lip line, so the mouth stays over the captions);
+  // with no zoom up, the speaker's head centre
+  const zs = zoomAt(t, zooms);
+  const zOrigin = zs.k !== 1 ? zs.origin : `${origin[0]}% ${origin[1]}%`;
   const top = (layout.seam / 100) * height * o;
   const k = 1 + (scale - 1) * o;
   const r = height * 0.03 * Math.min(1, top / 40);
@@ -497,7 +500,7 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
       <div style={{ position: "absolute", left: 0, top, width, height: height - top, overflow: "hidden",
         borderRadius: `${r}px ${r}px 0 0`, boxShadow: o > 0 ? `0 ${-height * 0.004}px ${height * 0.02}px rgba(0,0,0,${0.12 * o})` : undefined }}>
         <div style={{ position: "absolute", left: -(x / 100) * width * o, top: -(y / 100) * height * o, width: width * k,
-          height: height * k, transform: `translateX(${footageX(t, cards, width, m)}px) scale(${zoomScale(t, zooms)})`, transformOrigin: `${origin[0]}% ${origin[1]}%` }}>
+          height: height * k, transform: `translateX(${footageX(t, cards, width, m)}px) scale(${zs.k})`, transformOrigin: zOrigin }}>
           {video ? <OffthreadVideo src={staticFile(video)} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
         </div>
       </div>
@@ -508,7 +511,7 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
         return c && o > 0 ? (
           <div style={{ position: "absolute", left: 0, top: top - b, width, height: height - top + b, overflow: "hidden" }}>
             <div style={{ position: "absolute", left: -(x / 100) * width * o, top: -(y / 100) * height * o + b, width: width * k,
-              height: height * k, transform: `translateX(${footageX(t, cards, width, m)}px) scale(${zoomScale(t, zooms)})`, transformOrigin: `${origin[0]}% ${origin[1]}%` }}>
+              height: height * k, transform: `translateX(${footageX(t, cards, width, m)}px) scale(${zs.k})`, transformOrigin: zOrigin }}>
               <Img src={staticFile(`${c.src}/${String(frame).padStart(6, "0")}.png`)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             </div>
           </div>) : null;

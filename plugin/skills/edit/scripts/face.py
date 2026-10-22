@@ -9,8 +9,9 @@ Samples cut.mp4 every 0.5 s and finds the largest face with OpenCV's YuNet detec
 the HEAD, not the face: widened for hair and ears, because a card that stops at the
 eyebrows still sits on the hair.
 
-face.json: {"step_s": 0.5, "heads": [{"t": 0.0, "box": [x, y, w, h]} ...]} in percent of
-the frame, box null when no face was found.
+face.json: {"step_s": 0.5, "heads": [{"t": 0.0, "box": [x, y, w, h], "eyes": y, "mouth": y} ...]} in percent of
+the frame, box null when no face was found. eyes and mouth are the lines through YuNet's eye and mouth-corner
+landmarks: captions go under the mouth (plan.py), never over it, as creators put them.
 Exit codes: 0 ok, 1 error, 2 usage
 """
 import json
@@ -68,23 +69,53 @@ def frames(video):
 
 
 def scan(video):
-    det, heads = None, []
+    det, heads, last = None, [], None
     for t, im in frames(video):
         h, w = im.shape[:2]
         if det is None:
             det = detector(w, h)
         _, faces = det.detect(im)
-        box = None
+        box, lines = None, {}
         if faces is not None and len(faces):
-            big = max(faces, key=lambda f: f[2] * f[3])
-            box = head_box(big[:4].tolist(), w, h)
-        heads.append({"t": round(t, 2), "box": box})
-    return heads
+            # the face nearest the last one found (a cup or a hand raised to the lens can read as a bigger face), else
+            # the biggest
+            near = lambda f: (f[0] + f[2] / 2 - last[0]) ** 2 + (f[1] + f[3] / 2 - last[1]) ** 2
+            pick = min(faces, key=near) if last is not None else max(faces, key=lambda f: f[2] * f[3])
+            last = (pick[0] + pick[2] / 2, pick[1] + pick[3] / 2)
+            box = head_box(pick[:4].tolist(), w, h)
+            lines = face_lines(pick.tolist(), h)
+        heads.append({"t": round(t, 2), "box": box, **lines})
+    return steady(heads)
+
+
+JUMP = 20    # % of the frame: a head this far from both neighbours, which agree with each other, is a misread
+
+
+def steady(heads):
+    """Samples whose head jumps away from two neighbours that agree (a cup held up read as the face for one sample)
+    become null: no face there is better than a face in the wrong place."""
+    out = [dict(x) for x in heads]
+    c = lambda b: (b[0] + b[2] / 2, b[1] + b[3] / 2)
+    far = lambda a, b: max(abs(c(a)[0] - c(b)[0]), abs(c(a)[1] - c(b)[1]))
+    for i in range(1, len(heads) - 1):
+        a, b, n = heads[i - 1]["box"], heads[i]["box"], heads[i + 1]["box"]
+        if a and b and n and far(a, n) < JUMP / 2.5 and far(b, a) > JUMP and far(b, n) > JUMP:
+            out[i] = {"t": heads[i]["t"], "box": None}
+    return out
+
+
+def face_lines(f, h):
+    """YuNet's face row (box, then right eye, left eye, nose, right and left mouth corners) -> the eye line and the
+    mouth line, % down the frame."""
+    return {"eyes": round(100 * (f[5] + f[7]) / 2 / h, 1), "mouth": round(100 * (f[11] + f[13]) / 2 / h, 1)}
 
 
 def demo():
     b = head_box([100, 200, 100, 100], 400, 800)
     assert b == [20.0, 20.6, 35.0, 18.8], b
+    assert face_lines([100, 200, 100, 100, 130, 236, 170, 236, 150, 260, 132, 280, 168, 284], 800) == {"eyes": 29.5, "mouth": 35.2}
+    hs = [{"t": 0, "box": [27, 42, 51, 43]}, {"t": 0.5, "box": [49, 67, 51, 33], "mouth": 97.3}, {"t": 1, "box": [28, 42, 48, 42]}]
+    assert steady(hs)[1] == {"t": 0.5, "box": None} and steady(hs)[0] == hs[0]   # the cup held up for one sample
     assert head_box([0, 0, 100, 100], 400, 800)[:2] == [0.0, 0.0]
     try:
         import cv2  # noqa: F401  (the venv has it; a bare python skips this part)

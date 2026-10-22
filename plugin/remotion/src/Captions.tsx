@@ -17,6 +17,8 @@ export type Chunk = { text: string; start: number; end: number; words: Word[]; t
 export type CaptionStyle = {
   present?: boolean;
   y_pct?: number;
+  /** Captions under the mouth: where a contrast band may start (% down, the lip line, plan.py band_top). */
+  band_top?: number;
   size_pct?: number;
   case?: string;
   font_match?: string;
@@ -176,7 +178,9 @@ export const Captions: React.FC<{ style: CaptionStyle; chunks: Chunk[]; t: numbe
         <div style={{ position: "absolute", left: 0, right: 0, top: "50%", transform: "translateY(-50%)",
           // fades over the last 0.3 s of a hold, so a long pause lets the footage back without a jump
           opacity: chunk ? 1 : Math.max(0, Math.min(1, (BAND_HOLD_S - Math.max(near.start - t, t - near.end)) / 0.3)),
-          height: size * 2.9 * 2.4,   // one height for every page: the band never jumps with a big or stacked page
+          // one height for every page: the band never jumps with a big or stacked page; under the mouth it starts at
+          // the lip line (plan.py band_top) and reaches as far below the line, so it never darkens the face
+          height: style.band_top != null && style.y_pct != null ? 2 * ((style.y_pct - style.band_top) / 100) * height : size * 2.9 * 2.4,
           background: `linear-gradient(to bottom, ${rgba(near.treat_color ?? "#111111", 0)}, ${rgba(near.treat_color ?? "#111111", 0.5)} 35%, ${rgba(near.treat_color ?? "#111111", 0.5)} 65%, ${rgba(near.treat_color ?? "#111111", 0)})` }} />
       ) : null}
       {chunk ? <CaptionLine style={style} chunk={chunk} t={t} family={chunk.face === "light" ? lightFamily : family} m={m} boxW={boxW} maxSize={size} /> : null}

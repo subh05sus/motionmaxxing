@@ -33,7 +33,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
-from plan import GAP_S, MIN_SHOW_S, QUIET_HOLD_S, card_gaps, INK_MIN_W, OVERLAY_EDGE, READ_XH, SAFE, capture_xh, explain_ink, clean, cut_lines, cut_points, head_during, overlay_led, small_lines, sticker_crop, words_only, CAP_GLYPH, CHIN_SHARE, BOX_SHARE_MAX, placement  # noqa: E402
+from plan import GAP_S, MIN_SHOW_S, QUIET_HOLD_S, card_gaps, INK_MIN_W, OVERLAY_EDGE, READ_XH, SAFE, capture_xh, explain_ink, clean, cut_lines, cut_points, head_during, overlay_led, small_lines, sticker_crop, words_only, CAP_GLYPH, CHIN_SHARE, BOX_SHARE_MAX, placement, CAP_FLOOR, FACE_GROWN, MOUTH_FACE  # noqa: E402
 
 CENTRE_PLAN = 1.5      # % of the width a vertical card's box centre may sit off 50
 CENTRE_INK = 2.0       # % of the width a card's drawn content may sit off centre
@@ -82,6 +82,33 @@ def motion_findings(plan, style):
         return [finding("WARN", None, f"{len(clips)} motion clip(s) for {lines} sentences; the style asks for about "
                         f"{round(m['amount'] * lines)} (motion.amount {m['amount']})", fix)]
     return []
+
+
+def recording_findings(edit, visuals, root=None):
+    """A recording made for this edit (its brief.json "for": the edit's folder name) that no visual shows was captured
+    for nothing: a FAIL. Shown means a kit clip's beat.json lists it in "footage", or a visual's file is under it.
+    "skip": "<why>" in its brief.json is the decision not to use it."""
+    if root is None:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+        from mm import library
+        root = library.path(make=False) / "recordings"
+    if not Path(root).exists():
+        return []
+    used = set()
+    for f in (Path(edit) / "motion").glob("*/beat.json"):
+        used.update(Path(x).name for x in json.loads(f.read_text(encoding="utf-8")).get("footage") or [])
+    for v in visuals or []:
+        for src in (v.get("src"), (v.get("props") or {}).get("src")):
+            if src and "recordings/" in str(src):
+                used.add(str(src).split("recordings/")[1].split("/")[0])
+    out = []
+    for d in sorted(x for x in Path(root).iterdir() if (x / "brief.json").exists()):
+        br = json.loads((d / "brief.json").read_text(encoding="utf-8"))
+        if br.get("for") == Path(edit).name and not br.get("skip") and d.name not in used:
+            out.append(finding("FAIL", None, f"the recording '{br.get('title') or d.name}' was made for this video and is not in it",
+                               "show it as a footage clip (motion skill, references/kit-clips.md, \"Footage\"), or write "
+                               f"\"skip\": \"<why>\" in {d / 'brief.json'}"))
+    return out
 
 
 def finding(level, t, what, fix):
@@ -201,11 +228,24 @@ def on_screen(box, t, plan):
         return [ox + (x - ox) * s + px, oy + (y - oy) * s, w * s, h * s]
     sp = lay["speaker"]
     k = sp["scale"]
-    ox, oy = k * sp["origin"][0], k * sp["origin"][1]
+    zo = zoom_state(t, plan["zooms"])[1] if s != 1 else sp["origin"]   # StyleEdit.tsx: a zoom grows from its own origin
+    ox, oy = k * zo[0], k * zo[1]
     x0, y0 = ox + (k * x - ox) * s - sp["x"], lay["seam"] + oy + (k * y - oy) * s - sp["y"]
     x1, y1 = x0 + k * w * s, y0 + k * h * s
     y0 = max(y0, lay["seam"])          # the window clips the video at the seam
     return [x0, y0, x1 - x0, max(0, y1 - y0)]
+
+
+ON_MOUTH_DEEP = 2.0      # % of the frame: captions' ink this far over the mouth line is on the face
+ON_MOUTH_SHARE = 0.15    # pages reaching the mouth line at all: more than this share is a placement, not a lean
+
+
+def mouth_drawn(hd, plan):
+    """The mouth line of one face.json sample (or one estimated from the head box) where it is drawn: moved by the zoom,
+    the pan and the split window, as the head box is."""
+    x, y, w, h = hd["box"]
+    fh = h / (1 + sum(FACE_GROWN))
+    return on_screen([x, hd.get("mouth", y + FACE_GROWN[0] * fh + MOUTH_FACE * fh), w, 0], hd["t"], plan)[1]
 
 
 def fit(text, w, mx):
@@ -248,6 +288,7 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
     step = (face or {}).get("step_s", 0.5)
     heads = [{"t": hd["t"], "box": on_screen(hd["box"], hd["t"], plan) if hd["box"] else None}
              for hd in (face or {}).get("heads", [])]
+    mouths = [(hd["t"], mouth_drawn(hd, plan)) for hd in (face or {}).get("heads", []) if hd["box"]]
     for c in cards:
         name = f"'{c['trigger_word']}' {c.get('src') or c['anim']['type']}"
         x, y, w, h = c["box"]
@@ -336,9 +377,12 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
     cap = plan["captions"]["style"]
     ys = [("captions", cap.get("y_pct"))] + ([("full-frame captions", plan["layout"]["caption_full_y"])]
                                               if "caption_full_y" in (plan.get("layout") or {}) else [])
+    # captions' ink may go lower than cards: Reels' caption and name start under CAP_FLOOR (the owner's editor sets his
+    # captions at 75-78.5% down, under the mouth); a wide video keeps the safe zone
+    cap_floor = CAP_FLOOR - CAP_GLYPH * (cap.get("size_pct") or 4.4) if aspect == "9:16" else 100 - bottom
     for what, v in ys:
-        if v is not None and not top <= v <= 100 - bottom:
-            out.append(finding("FAIL", None, f"{what} at {v}% down, under the app's UI ({top}-{100 - bottom}% is clear)",
+        if v is not None and not top <= v <= cap_floor + 0.05:
+            out.append(finding("FAIL", None, f"{what} at {v}% down, under the app's UI ({top}-{cap_floor:.1f}% is clear)",
                                "set captions.y_pct in style.json inside that band, then plan again"))
     if aspect == "9:16" and (cap.get("width_pct") or 86) > 100 - 2 * r + 0.05 and (plan.get("layout") or {}).get("mode") != "letterbox":
         out.append(finding("FAIL", None, f"captions {cap.get('width_pct') or 86}% wide reach past the safe zone's sides "
@@ -352,11 +396,15 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
         elif tail > TAIL_S + 0.01:
             out.append(finding("FAIL", ch["start"], f"caption '{ch['text']}' held {tail:.2f} s past its last word",
                                "plan again with the current plan.py (it caps the tail at 0.3 s)"))
-    # The captions' ink: never on the face, and wholly inside the safe zone (the app's top bar, its caption and
-    # buttons at the bottom). The face is the head box less its neck margin, as drawn (zooms, pans, the split window).
+    # The captions' ink: never over the eyes or the mouth, and inside the safe zone (the app's top bar; at the bottom
+    # its caption and name, CAP_FLOOR). Under the mouth, on the chin, is where creators set them, and when the speaker
+    # leans in their ink touches his lower lip (the owner's editor: 12% of the frames): the face that must stay clear is
+    # the head box's top to the mouth line, as drawn (zooms, pans, the split window), in every layout.
     half = CAP_GLYPH * (cap.get("size_pct") or 4.4)
     lay = plan.get("layout") or {}
-    on_face, outside = [], []
+    on_face, outside, on_chunks = [], [], []
+    y_of = lambda ch: cap.get("y_pct") if panel_at((ch["start"] + ch["end"]) / 2, plan) >= 0.5 or "caption_full_y" not in lay \
+        else lay["caption_full_y"]
     for ch in plan["captions"]["chunks"] if aspect == "9:16" and lay.get("mode") != "letterbox" else ():
         t = (ch["start"] + ch["end"]) / 2
         if any(c.get("layout") == "scene" and c["start"] <= t < c["end"] for c in cards):
@@ -367,22 +415,29 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
             continue
         lines = max(1, math.ceil(len(ch["text"]) / 28)) if cap.get("words_per_caption", 3) > 2 else 1
         a, b = y - half * lines, y + half * lines
-        if a < top - 0.05 or b > 100 - bottom + 0.05:
+        if a < top - 0.05 or b > (CAP_FLOOR if aspect == "9:16" else 100 - bottom) + 0.05:
             outside.append((ch["start"], ch["text"], a, b))
         hd = heads and head_during(heads, step, ch["start"], ch["end"])
-        if hd and not panel_up:
-            face_b = hd[3] - CHIN_SHARE * (hd[3] - hd[1])
-            if a < face_b - 0.5 and b > hd[1] + 0.5:
-                on_face.append((ch["start"], ch["text"], hd))
+        mouth = max((v for tt, v in mouths if ch["start"] - step <= tt <= ch["end"]), default=None)
+        if hd and mouth is not None and a < mouth - 0.3 and b > hd[1] + 0.5:
+            on_face.append((ch["start"], ch["text"], hd[1], mouth))
+            on_chunks.append(ch)
     if on_face:
-        t0, txt, hd = on_face[0]
-        out.append(finding("FAIL", t0, f"{len(on_face)} caption page(s) sit on the face ('{txt}' at {t0:.1f} s; face "
-                           f"{hd[1]:.0f}-{hd[3]:.0f}% down)", "plan again (plan.py puts them under the chin or over the head "
-                           "inside the safe zone); a hand-set captions.y_pct in style.json wins over that: remove it"))
+        # a few pages touching the mouth line while he leans in is the creator's own look (his editor: 12% of the
+        # frames); deep into the face, or on many pages, is captions placed on the face
+        pages = len(plan["captions"]["chunks"]) or 1
+        deep = max(mo - (y_of(ch) - half) for ch, (_, _, _, mo) in zip(on_chunks, on_face))
+        t0, txt, ht, mo = on_face[0]
+        bad = deep > ON_MOUTH_DEEP or len(on_face) > ON_MOUTH_SHARE * pages
+        out.append(finding("FAIL" if bad else "WARN", t0, f"{len(on_face)} caption page(s) ({len(on_face) / pages:.0%}) reach the "
+                           f"mouth line, up to {deep:.1f}% of the frame ('{txt}' at {t0:.1f} s; head top to mouth {ht:.0f}-{mo:.0f}% down)",
+                           "plan again (plan.py puts them under the mouth, else over the head, inside the safe zone); a "
+                           "hand-set captions.y_pct in style.json wins over that: remove it" if bad else
+                           "he leans in there: fine at this share, look at those frames"))
     if outside:
         t0, txt, a, b = outside[0]
         out.append(finding("FAIL", t0, f"{len(outside)} caption page(s) reach under the app's UI ('{txt}' ink {a:.0f}-{b:.0f}% "
-                           f"down; clear: {top}-{100 - bottom}%)", "plan again, or set captions.size_pct smaller in style.json"))
+                           f"down; clear: {top}-{CAP_FLOOR:.0f}%)", "plan again, or set captions.size_pct smaller in style.json"))
     # The mix: small boxes are the quiet placement; the big ones (behind the speaker, half the screen, the whole
     # screen) are what make it look edited. Logos are counted apart.
     big = [c for c in cards if c.get("lane") != "logo"]
@@ -648,6 +703,19 @@ def cutout_alpha(edit, plan, t):
     return cv2.imread(str(png), cv2.IMREAD_UNCHANGED)[..., 3] if png and png.exists() else None
 
 
+def caption_rows(plan, t, H):
+    """(first row, end row) at height H of the captions drawn at t: the line's ink, or its contrast band (from
+    band_top as far below the line, Captions.tsx), so the render check never reads them as a card."""
+    cs = plan["captions"]["style"]
+    lay = plan.get("layout") or {}
+    y = cs.get("y_pct") if panel_at(t, plan) >= 0.5 or "caption_full_y" not in lay else lay["caption_full_y"]
+    if y is None or cs.get("present") is False:
+        return 0, 0
+    size = cs.get("size_pct") or 4.4
+    reach = max(CAP_GLYPH * size * 1.6, y - cs["band_top"] if cs.get("band_top") is not None else size * 2.9 * 2.4 / 2)
+    return max(0, int((y - reach) / 100 * H)), min(H, int((y + reach) / 100 * H) + 1)
+
+
 def face_cover(ink, head, person=None):
     """Share of the head box (px x0, y0, x1, y1) the card is drawn ON. A behind card under a cutout is
     on the head only where the speaker is (person: the matte's solid pixels) and the card still shows;
@@ -705,6 +773,8 @@ def check_render(edit, plan, video):
             bg = cv2.warpAffine(cut, zm, (W, H))
         diff = cv2.absdiff(cv2.GaussianBlur(frame, (5, 5), 0), cv2.GaussianBlur(bg, (5, 5), 0)).max(axis=2)
         ink = cv2.morphologyEx((diff > INK_DIFF["split" if sp else "overlay"]).astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        r0, r1 = caption_rows(plan, t, H)   # the captions and their contrast band are not a card
+        ink[r0:r1] = 0
         heads = []
         if n % 2 == 0:      # the head every 0.5 s. Overlay: from the cut itself, so a card on the face can't hide it
             src = frame if sp else bg
@@ -716,6 +786,8 @@ def check_render(edit, plan, video):
             for f in faces if faces is not None else []:
                 b = facemod.head_box(f[:4].tolist(), sw, sh)
                 if not sp or b[1] + b[3] / 2 > plan["layout"]["seam"]:   # split: the speaker is in the window
+                    if sp and b[1] < plan["layout"]["seam"]:   # ...and only the head under the seam is drawn (the panel
+                        b = [b[0], plan["layout"]["seam"], b[2], b[1] + b[3] - plan["layout"]["seam"]]   # covers his hair)
                     heads.append(b)
             heads = sorted(heads, key=lambda b: -b[2] * b[3])[:1]
         grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
@@ -970,6 +1042,17 @@ def demo():
     scene = {**plan, "cards": [{"anim": {"type": "flow"}, "layout": "scene", "start": 0.5, "end": 3,
                                 "trigger_word": "s", "box": [0, 0, 100, 100]}]}
     assert not any(f["level"] == "FAIL" and "'s'" in f["what"] for f in check_plan(scene, face))
+    with tempfile.TemporaryDirectory() as rt:   # a recording made for this edit and shown nowhere: FAIL; used or skipped: fine
+        rt = Path(rt)
+        for n, br in (("site", {"title": "Site", "for": "take"}), ("wiki", {"title": "Wiki", "for": "take", "skip": "a test"}),
+                      ("other", {"title": "Other", "for": "another"})):
+            (rt / "recordings" / n).mkdir(parents=True)
+            (rt / "recordings" / n / "brief.json").write_text(json.dumps(br))
+        (rt / "edits" / "take" / "motion" / "03").mkdir(parents=True)
+        assert [f["what"] for f in recording_findings(rt / "edits" / "take", [], rt / "recordings")] == \
+            ["the recording 'Site' was made for this video and is not in it"]
+        (rt / "edits" / "take" / "motion" / "03" / "beat.json").write_text(json.dumps({"footage": ["recordings/site"]}))
+        assert recording_findings(rt / "edits" / "take", [], rt / "recordings") == []
     got = check_plan(plan, face)
     has = lambda lvl, word, s: any(f["level"] == lvl and s in f["what"] and f"'{word}'" in f["what"] for f in got)
     assert not any(f"'a'" in f["what"] for f in got if f["level"] == "FAIL"), got   # clean card passes
@@ -1232,6 +1315,7 @@ def main():
         found += music_findings(str(edit), plan, style, prof())
         found += style_pick(edit, rd("style.json") or {})
         found += motion_findings(plan, style)
+        found += recording_findings(edit, rd("visuals.json") or [])
     else:
         video = edit / f"render{tag}.mp4"
         if not video.exists():

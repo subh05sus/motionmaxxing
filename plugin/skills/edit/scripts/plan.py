@@ -1704,9 +1704,12 @@ def split_art_box(seam, wide=False):
     return [m, t, 100 - 2 * m, seam - SPLIT_GAP - t]
 
 
-def speaker_frame(face, seam, head_room=HEAD_ROOM):
+def speaker_frame(face, seam, head_room=HEAD_ROOM, keep=False):
     """How the cut sits in the window under the seam: scaled so the head is at least MIN_HEAD tall,
     moved so the hair sits HEAD_ROOM below the window's top and the head is centred left to right.
+    keep (a half screen per beat): the speaker stays where the camera has him and the panel covers the top half,
+    the seam crossing his hair, as the owner's editor does: his face does not jump when a panel opens and his
+    captions stay under his mouth. He moves down only as far as keeps his eyes EYE_ROOM under the seam.
     x, y: how far the scaled video's top-left is pulled left and up, in % of the frame. origin: the
     head's centre on the video, for zooms."""
     win = 100 - seam
@@ -1719,6 +1722,9 @@ def speaker_frame(face, seam, head_room=HEAD_ROOM):
     cx = q([b[0] + b[2] / 2 for b in bs], 0.5)
     k = min(max(1, MIN_HEAD / max(1, bottom - top)), MAX_SPEAKER_SCALE)
     y = min(max(0, k * top - head_room), k * 100 - win)
+    fl = keep and face_lines(face)
+    if fl:   # the eyes where they are on the full frame (y = seam at scale 1), never closer than EYE_ROOM to the seam
+        y = min(max(0, min(seam + (k - 1) * fl[0], k * fl[0] - EYE_ROOM)), k * 100 - win)
     x = min(max(0, k * cx - 50), k * 100 - 100)
     if k * bottom - y > win:
         print("warning: the head is taller than the split window; the chin is cut off", file=sys.stderr)
@@ -2414,6 +2420,32 @@ def with_formats(images, visuals):
 CAP_GLYPH = 0.35      # half a one-word lowercase caption's ink height, in font sizes (bold, x-height plus ascenders)
 EYES_SHARE = 0.45     # the eyes, down the head box (hair to chin)
 CHIN_SHARE = 0.1      # face.py grows the face down by 0.15 of its height; that is a tenth of the head box
+FACE_GROWN = (0.35, 0.15)          # face.py HAIR, CHIN: how far the head box grows YuNet's face box up and down
+EYES_FACE, MOUTH_FACE = 0.36, 0.73  # the eye and mouth lines down the face box (a face.json from before it kept them)
+LIP_CLEAR = 0.08      # the lower lip under the mouth line, a share of the face's height: captions' ink stays under it
+CAP_FLOOR = 80.0      # captions' ink stays above this (% down): Reels' caption and name sit lower. The owner's editor
+                      # sets them at 75-78.5, under the mouth; cards keep to SAFE's 75
+EYE_ROOM = 6.0        # a half-screen panel's seam stays this far above the speaker's eyes
+
+
+def face_lines(face, start=None, end=None):
+    """(eyes, mouth, face height), % of the frame: the medians over the take, or over [start, end] (the lowest mouth
+    there, the worst case for captions under it). From face.json's eye and mouth lines, or estimated from the head
+    boxes when it has none. None with no face found."""
+    hs = [h for h in (face or {}).get("heads", []) if h.get("box")]
+    if start is not None:
+        step = (face or {}).get("step_s", 0.5)
+        hs = [h for h in hs if start - step <= h["t"] <= end]
+    if not hs:
+        return None
+    med = lambda xs: sorted(xs)[len(xs) // 2]
+    fh = med([h["box"][3] / (1 + sum(FACE_GROWN)) for h in hs])
+    if all("mouth" in h for h in hs):
+        mouths = [h["mouth"] for h in hs]
+        return med([h["eyes"] for h in hs]), max(mouths) if start is not None else med(mouths), fh
+    top = med([h["box"][1] for h in hs]) + FACE_GROWN[0] * fh
+    bottom = max(h["box"][1] for h in hs) + FACE_GROWN[0] * fh if start is not None else top
+    return top + EYES_FACE * fh, bottom + MOUTH_FACE * fh, fh
 
 
 def heads_median(face):
@@ -2465,33 +2497,37 @@ def mix_note(cards):
               "(the whole screen) in visuals.json; check.py plan FAILs it", file=sys.stderr)
 
 
-def caption_under_chin(cap, face, aspect, above=False, tall=1.0):
-    """Captions never on the face, and always inside the app's safe zone. A vertical caption line whose ink would
-    touch the head (face.json, the median head over the take, hair to chin) moves, in this order:
-      1. fully under the chin, when the line fits there above the app's bottom UI;
-      2. over the head, with room for a punch-in (the head grows up from the eyes), when that is inside the top
-         safe line (also first when the creator's own captions sit over her face: above);
-      3. neither fits (a head filling the frame): the bottom safe line, and check.py plan says so.
-    Changes cap["y_pct"] (and sets cap["over_head"] in 2); returns the chin line (% down) when it went under the
-    chin, else None."""
+def caption_under_mouth(cap, face, aspect, above=False, tall=1.0):
+    """Captions never over the eyes or the mouth, and inside the safe zone. Creators set them on the chin, just under
+    the mouth: the owner's editor at 75-78.5% down with the mouth line at 72, the same in every layout. A vertical
+    caption line whose ink reaches above the lip line (face.json's mouth line, the median over the take, plus LIP_CLEAR
+    of the face) and below the top of the head moves, in this order:
+      1. under the lip line, when it fits there above CAP_FLOOR;
+      2. over the head, with room for a punch-in, when that is inside the top safe line (also first when the
+         creator's own captions sit over the face: above);
+      3. neither fits (a head filling the frame): the floor, and check.py plan says so.
+    Changes cap["y_pct"] (and sets cap["over_head"] in 2); returns the lip line (% down) when the captions are under
+    the mouth, else None."""
     hm = aspect == "9:16" and heads_median(face)
-    half = CAP_GLYPH * (cap.get("size_pct") or 4.4) * tall
-    if not hm or not hm[0] - 2 * half - 0.6 < cap["y_pct"] < hm[1] + half + 0.6:
+    fl = hm and face_lines(face)
+    if not fl:
         return None
-    top_safe, floor = SAFE[aspect][1], 100 - SAFE[aspect][3]
-    cap["off_face_from"] = cap["y_pct"]   # style_check.py: moved off the face on purpose, not a mismatch
-    chin = hm[1] - CHIN_SHARE * (hm[1] - hm[0])
-    under = chin + 0.6 + half
+    half = CAP_GLYPH * (cap.get("size_pct") or 4.4) * tall
+    lip = fl[1] + LIP_CLEAR * fl[2]
+    y = cap["y_pct"]
+    if y - half >= lip - 0.05 and not above:
+        return lip                       # under the mouth already: where the creator has them
+    if y + half <= hm[0] - 0.6:
+        return None                      # over the head already
+    cap["off_face_from"] = y             # style_check.py: moved off the face on purpose, not a mismatch
+    under = lip + half
     rise = EYES_SHARE * (hm[1] - hm[0]) * (ZOOM_ROOM - 1)
     over = hm[0] - rise - 0.6 - half
-    if (above or under + half > floor) and over - half >= top_safe:
+    if (above or under + half > CAP_FLOOR) and over - half >= SAFE[aspect][1]:
         cap["y_pct"], cap["over_head"] = round(over, 1), True
         return None
-    if under + half <= floor:
-        cap["y_pct"] = round(under, 1)
-        return chin
-    cap["y_pct"] = round(floor - half, 1)   # no room either way: check.py plan FAILs captions on the face
-    return chin
+    cap["y_pct"] = min(math.ceil(under * 10) / 10, round(CAP_FLOOR - half, 1))   # past the floor: check.py plan FAILs it
+    return lip
 
 
 def clear_hair(zooms, face, cap):
@@ -2512,39 +2548,39 @@ def clear_hair(zooms, face, cap):
     return out
 
 
-def clear_chin(zooms, face, cap):
-    """A push zoom grows the head from its top, so the chin moves down into captions set under it. Each zoom's scale
-    is held to what keeps the chin (face.json's head bottom less the chin margin) above the captions' ink; one
-    held under 1.02 is dropped. When the chin is already at the captions before any zoom (the take's own framing),
-    the zoom keeps its scale and grows from the eyes instead."""
+def clear_mouth(zooms, face, cap):
+    """A push zoom grows the face from its origin, so the mouth moves down into captions set under it. Each zoom's
+    scale is held to what keeps the lip line (the lowest mouth line while it is up, plus LIP_CLEAR of the face) over
+    the captions' ink; one held under 1.02 is dropped. When the lip line already reaches the captions before any zoom
+    (the take's own framing, a low head), the zoom keeps the creator's punch and grows from the lip line instead: the
+    face rises, the mouth stays where it is, the eyes inside the safe zone."""
     top = cap["y_pct"] - CAP_GLYPH * (cap.get("size_pct") or 4.4)
     out = []
     for z in zooms:
         hd = head_during(face["heads"], face.get("step_s", 0.5), z["start"], z["end"])
-        oy = (z.get("origin") or [50, 30])[1]
-        chin = hd and hd[3] - CHIN_SHARE * (hd[3] - hd[1])
+        ln = face_lines(face, z["start"], z["end"])
         want = z.pop("want", z["scale"])
-        if chin and chin >= top:
-            # The take's own framing already has the captions over the chin (a close, low head, as most phone
-            # takes are): a zoom cannot put them on the face more than the footage does. Keep the creator's punch,
-            # grown from the eyes so the face stays where it is, held so the eyes stay inside the safe zone.
-            eyes = hd[1] + EYES_SHARE * (hd[3] - hd[1])
-            k = min(want, 1.3, 100 / max(1, hd[2] - hd[0]))
-            if k >= 1.02 and eyes >= SAFE["9:16"][1]:
-                out.append({**z, "scale": round(k, 3), "origin": [(z.get("origin") or [50, 30])[0], round(eyes, 1)]})
+        if not hd or not ln:
+            out.append(z)
             continue
-        if chin and chin > oy:
-            k = (top - oy) / (chin - oy)
-            # held under the creator's punch: grow from the chin instead, the head rising (her 2x on a close shot
-            # crops the hair too), as far as keeps the eyes inside the safe zone and the head inside the width
-            eyes = hd[1] + EYES_SHARE * (hd[3] - hd[1])
-            up = min(want, (chin - SAFE["9:16"][1]) / max(1, chin - eyes), 100 / max(1, hd[2] - hd[0]))
-            if up > max(k, 1.02) and chin < top:
-                out.append({**z, "scale": round(up, 3), "origin": [z.get("origin", [50, 30])[0], round(chin, 1)]})
-                continue
-            if k < 1.02:
-                continue
-            z = {**z, "scale": round(min(z["scale"], k), 3)}
+        eyes, mouth, fh = ln
+        lip = mouth + LIP_CLEAR * fh
+        oy = (z.get("origin") or [50, 30])[1]
+        x = (z.get("origin") or [50, 30])[0]
+        up = min(want, 1.3, (lip - SAFE["9:16"][1]) / max(1, lip - eyes), 100 / max(1, hd[2] - hd[0]))
+        if lip >= top:
+            if up >= 1.02:
+                out.append({**z, "scale": round(up, 3), "origin": [x, round(lip, 1)]})
+            continue
+        if lip > oy:
+            k = (top - oy) / (lip - oy)
+            if k < want:      # held under the creator's punch: grow from the lip line instead when that keeps more of it
+                if up > max(k, 1.02):
+                    out.append({**z, "scale": round(up, 3), "origin": [x, round(lip, 1)]})
+                    continue
+                if k < 1.02:
+                    continue
+                z = {**z, "scale": round(min(z["scale"], k), 3)}
         out.append(z)
     return out
 
@@ -2582,7 +2618,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     visuals = anti_generic(list(visuals), profile)
     cap = dict(style.get("captions") or {})
     _, top, _, bottom = SAFE[aspect]
-    cap["y_pct"] = min(max(cap.get("y_pct") or 70, top + 5), 100 - bottom - 4)   # clear of the app's UI
+    cap["y_pct"] = min(max(cap.get("y_pct") or 70, top + 5), CAP_FLOOR - CAP_GLYPH * (cap.get("size_pct") or 4.4))   # clear of the app's UI
     if aspect == "9:16":   # centred captions keep the safe zone's wider side margin on both sides
         m = max(SAFE[aspect][0], SAFE[aspect][2])
         cap["width_pct"] = min(cap.get("width_pct") or 86, 100 - 2 * m)
@@ -2594,7 +2630,9 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
             cap["light_font"] = LIGHT_FONT.get(cap["light_face"], cap.get("font_match"))
     fj = edit_dir and Path(edit_dir) / "face.json"
     face = json.loads(fj.read_text(encoding="utf-8")) if fj and fj.exists() else None
-    chin = caption_under_chin(cap, face, aspect, took(style, "captions") and above_face(style), page_tall(chunks))
+    lip = caption_under_mouth(cap, face, aspect, took(style, "captions") and above_face(style), page_tall(chunks))
+    if lip is not None:
+        cap["band_top"] = round(lip, 1)   # a contrast band behind them starts at the lip line: never over the face
     lay = {**SPLIT, **(style.get("layout") or {}), **(layout or {})}
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
     from mm import profile as prof_mod
@@ -2627,7 +2665,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
     probe_cards = place_cards(list(images) + anim_items(visuals, edit_dir, style), words, duration, style, aspect)
     _, wants_split = lay_out(probe_cards, aspect, face, style, split_ok)
     split_now = split_now or wants_split
-    logo_y = split_y if split_now else cap["y_pct"]
+    logo_y = split_y if split_ok and explicit == "split" else cap["y_pct"]   # a half screen per beat keeps the speaker and his captions
     cards = thin_cards(place_cards(list(images) + anim_items(visuals, edit_dir, style) + logo_items(visuals, edit_dir, logo_y, aspect, pictures_only(style)),
                                    words, duration, style, aspect), duration, style.get("cards"))
     cards, _ = lay_out(cards, aspect, face, style, split_ok)
@@ -2654,8 +2692,8 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
                 z["want"], z["scale"] = z["scale"], max(1.0, fit)
     if face and cap.get("over_head"):
         zooms = clear_hair(zooms, face, cap)
-    elif chin is not None:
-        zooms = clear_chin(zooms, face, cap)
+    elif lip is not None:
+        zooms = clear_mouth(zooms, face, cap)
     for z in zooms:
         z.pop("want", None)
     for a, b in quiet:
@@ -2687,7 +2725,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
         if per_beat:
             # "half the screen" means half: a measured panel seam (a creator's graphics zone) is for a whole-video split
             seam = max(seam, SPLIT["seam"])
-            split_y = min(seam + SPLIT_CAP_BELOW, 100 - bottom - 4)
+            split_y = cap["y_pct"]     # the speaker stays where he is (speaker_frame keep), so do his captions
         art = split_art_box(seam, wide=per_beat)
         cap["y_pct"] = split_y
         # a logo is dropped while a scene or a panel card is up (the frame is already showing the visual)
@@ -2696,7 +2734,8 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
         if lay.get("face_every_s"):
             panel = face_every(panel, float(lay["face_every_s"]))
         out = {**head, "layout": {"mode": "split", "ground": lay["ground"], "seam": seam, "art": art,
-                                  "speaker": speaker_frame(face, seam, -(CUTOUT_BREAKOUT - 2) if lay.get("variant") == "cutout" else HEAD_ROOM),
+                                  "speaker": speaker_frame(face, seam, -(CUTOUT_BREAKOUT - 2) if lay.get("variant") == "cutout" else HEAD_ROOM,
+                                                           keep=per_beat and lay.get("variant") != "cutout"),
                                   "caption_full_y": over_y,
                                   **({"variant": "cutout", "breakout": CUTOUT_BREAKOUT} if lay.get("variant") == "cutout" else {})}}
     else:
@@ -3543,20 +3582,30 @@ def demo():
     ag = anti_generic([{"kind": "title", "text": "New tool \U0001F929"}, {"kind": "anim", "type": "notes", "props": {"lines": [{"text": "ok \U0001F929"}]}}],
                       warn=lambda m: None)
     assert ag[0]["text"].endswith("\U0001F929") and ag[1]["props"]["lines"][0]["text"] == "ok", ag
-    # captions never on the face: a line on the head moves fully under the chin when it fits above the app's UI
+    # captions never over the mouth: a line on the face moves under the lip line (estimated from the head box here)
     fc = {"step_s": 0.5, "heads": [{"t": i / 2, "box": [35, 31, 48, 41.5]} for i in range(9)]}
     cp = {"y_pct": 64, "size_pct": 4.4}
-    assert abs(caption_under_chin(cp, fc, "9:16") - 68.35) < 0.01 and cp["y_pct"] == 70.5, cp
-    assert cp["y_pct"] + CAP_GLYPH * 4.4 <= 100 - SAFE["9:16"][3], cp   # its ink inside the safe zone
+    assert abs(caption_under_mouth(cp, fc, "9:16") - 63.09) < 0.01 and cp["y_pct"] == 64.7, cp
+    assert cp["y_pct"] + CAP_GLYPH * 4.4 <= CAP_FLOOR, cp   # its ink above the app's caption and name
     ca = {"y_pct": 40, "size_pct": 4.4}   # her captions sit over her face: ours go over the head, inside the safe zone
-    assert caption_under_chin(ca, fc, "9:16", above=True) is None and ca["y_pct"] == 23.3 and ca["over_head"], ca
-    # a close, low head (a phone take: hair at 41%, chin under the app's bottom UI): over the head, room for a punch
+    assert caption_under_mouth(ca, fc, "9:16", above=True) is None and ca["y_pct"] == 23.3 and ca["over_head"], ca
+    # the owner's take (a close, low head, hair at 41%): his captions at 77% stay there, on the chin under the mouth
     low = {"step_s": 0.5, "heads": [{"t": i / 2, "box": [15.6, 41.5, 65.2, 41.8]} for i in range(9)]}
     cl = {"y_pct": 77, "size_pct": 3.83}
-    assert caption_under_chin(cl, low, "9:16") is None and cl["y_pct"] == 33.9 and cl["over_head"], cl
-    zl = clear_hair([{"start": 0, "end": 2, "scale": 1.2, "origin": [48, 41.5]}], low, cl)
+    assert abs(caption_under_mouth(cl, low, "9:16") - 73.83) < 0.01 and cl["y_pct"] == 77 and not cl.get("over_head"), cl
+    # face.json's own mouth line wins over the estimate; a line at 70 on the mouth moves under it
+    lm = {"step_s": 0.5, "heads": [{"t": i / 2, "box": [15.6, 41.5, 65.2, 41.8], "eyes": 61.6, "mouth": 71.4} for i in range(9)]}
+    c7 = {"y_pct": 70, "size_pct": 3.83}
+    assert abs(caption_under_mouth(c7, lm, "9:16") - 73.63) < 0.01 and c7["y_pct"] == 75.0, c7
+    co = {"y_pct": 33.9, "size_pct": 3.83, "over_head": True}
+    zl = clear_hair([{"start": 0, "end": 2, "scale": 1.2, "origin": [48, 41.5]}], low, co)
     assert zl and zl[0]["scale"] == 1.2 and zl[0]["origin"][1] == 60.3, zl   # grown from the eyes, hair under the captions
-    assert clear_hair([{"start": 0, "end": 2, "scale": 1.6, "origin": [48, 41.5]}], low, cl)[0]["scale"] < 1.32   # held
+    assert clear_hair([{"start": 0, "end": 2, "scale": 1.6, "origin": [48, 41.5]}], low, co)[0]["scale"] < 1.32   # held
+    # a panel per beat keeps the speaker where the camera has him (the seam crosses his hair, his face never jumps);
+    # a head higher up moves down only as far as keeps his eyes EYE_ROOM under the seam
+    assert speaker_frame(lm, 50, keep=True)["y"] == 50 and speaker_frame(lm, 50)["y"] == 37.5
+    hi = {"step_s": 0.5, "heads": [{"t": i / 2, "box": [30, 20, 40, 30], "eyes": 45.0, "mouth": 55.0} for i in range(9)]}
+    assert speaker_frame(hi, 50, keep=True)["y"] == 39.0
     assert above_face({"captions": {"y_pct": 38.6}, "face": {"y_pct": 48.9, "height_pct": 8.2}})
     assert not above_face({"captions": {"y_pct": 70}, "face": {"y_pct": 48.9, "height_pct": 8.2}})
     # her grade: a grey cut is pulled darker towards her luma; saturation of grey cannot be scaled, so it is held
@@ -3588,13 +3637,15 @@ def demo():
     gs = scene_grounds([{"start": i, "scene_by": "creator", **({"anim": {"type": "notes"}} if i == 3 else {})} for i in range(4)], {"grade": {"luma": 115}})
     assert [c["ground"] for c in gs] == ["ink", "ground", "ink", "ground"], gs   # 42% paper for her 115; the notes card on paper
     assert not off_screen({"face": {"present_pct": 95}}) and not off_screen({"face": {"present_pct": 44}, "blend": {"take": ["captions"]}})
-    assert caption_under_chin({"y_pct": 80, "size_pct": 4}, fc, "9:16") is None and caption_under_chin({"y_pct": 64}, None, "9:16") is None
-    # a push zoom from the head's top is held so the chin stays above the captions; one that cannot move is dropped
-    zz = clear_chin([{"start": 0, "end": 2, "scale": 1.15, "origin": [59, 31]}, {"start": 2, "end": 4, "scale": 1.15, "origin": [59, 70]}], fc, cp)
-    assert zz[0]["scale"] == 1.15 and zz[0]["origin"][1] == 68.3 and zz[1]["scale"] == 1.15, zz   # grown from the chin instead: the head rises, kept
-    # the chin already at the captions before any zoom (a close, low head): the punch is kept, grown from the eyes
-    assert clear_chin([{"start": 0, "end": 2, "scale": 1.15, "origin": [59, 31]}], fc, {"y_pct": 68, "size_pct": 4.4}) == \
-        [{"start": 0, "end": 2, "scale": 1.15, "origin": [59, 49.7]}]
+    c8 = {"y_pct": 78, "size_pct": 4}
+    assert caption_under_mouth(c8, fc, "9:16") is not None and c8["y_pct"] == 78 and caption_under_mouth({"y_pct": 64}, None, "9:16") is None
+    # a push zoom from the head's top would take the mouth into the captions: grown from the lip line instead (the face
+    # rises, the mouth stays); one growing from under the mouth is kept as it is
+    zz = clear_mouth([{"start": 0, "end": 2, "scale": 1.15, "origin": [59, 31]}, {"start": 2, "end": 4, "scale": 1.15, "origin": [59, 70]}], fc, cp)
+    assert zz[0]["scale"] == 1.15 and zz[0]["origin"][1] == 63.1 and zz[1] == {"start": 2, "end": 4, "scale": 1.15, "origin": [59, 70]}, zz
+    # the lip line already at the captions before any zoom: the punch is kept, grown from the lip line
+    assert clear_mouth([{"start": 0, "end": 2, "scale": 1.15, "origin": [59, 31]}], fc, {"y_pct": 62, "size_pct": 4.4}) == \
+        [{"start": 0, "end": 2, "scale": 1.15, "origin": [59, 63.1]}]
     # one capture per page: the second capture of the same URL is dropped
     vis = [{"kind": "capture", "word": "a", "url": "https://x.dev/"}, {"kind": "capture", "word": "b", "url": "https://x.dev"},
            {"kind": "capture", "word": "c", "url": "https://y.dev"}]
