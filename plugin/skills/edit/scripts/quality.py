@@ -376,6 +376,14 @@ def caption_fill(frame, colours, ys, font_px, text):
     for c in colours:
         tol = min(60, max(8, 0.4 * float(np.abs(typical - c).max())))
         near |= np.abs(f - c).max(axis=2) < tol
+    # a page near the fill colour around the caption (white captions on a band over a light phone screen) is one
+    # solid blob wider than a letter, and its rows would win the count: it read 1.0:1, the page against itself
+    ca, cb = max(0, lo - int(font_px)), min(H, hi + int(font_px))
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(near[ca:cb, xa:xb].astype(np.uint8))
+    solid = [i for i in range(1, n) if stats[i, cv2.CC_STAT_WIDTH] > font_px
+             and stats[i, cv2.CC_STAT_AREA] > 0.8 * stats[i, cv2.CC_STAT_WIDTH] * stats[i, cv2.CC_STAT_HEIGHT]]
+    if solid:
+        near[ca:cb, xa:xb] &= ~np.isin(lab, solid)
     per_row = near[lo:hi, xa:xb].sum(axis=1).astype(float)
     k = max(1, int(font_px * 0.7))
     score = np.convolve(per_row, np.ones(k), "same")
@@ -1340,6 +1348,16 @@ def demo():
     assert rows.start < 600 < rows.stop and not touches and not fill[:, :40].any()
     assert worst_contrast(fr[rows], fill, 2) > 10                      # against its stroke
     assert worst_contrast(fr[rows], fill, 6) < CONTRAST_WARN            # reaching past it, into the grey
+    # white captions on a dark band over a light phone screen (the slice's 12.8 s, full size): the page around the band
+    # is near the fill colour too and its rows won the count (1.0:1, the page against itself); the word reads on its band
+    lite = np.full((1920, 1080, 3), (244, 239, 239), np.uint8)
+    lite[1424:1536] = 60
+    glyph = np.zeros((1920, 1080), np.uint8)
+    cv2.putText(glyph, "dich", (445, 1505), cv2.FONT_HERSHEY_DUPLEX, 2.6, 255, 7)
+    lite[glyph > 0] = 255
+    rows, fill, _ = caption_fill(lite, [np.array([255, 255, 255.])], [1478.4], 90, "dich")
+    assert not fill[:1424 - rows.start].any() and not fill[1536 - rows.start:].any(), rows
+    assert worst_contrast(lite[rows], fill, 5) > CONTRAST_WARN, worst_contrast(lite[rows], fill, 5)
     # caption_lines: one line at the caption's y reads 1; the same page wrapped to two lines reads 2
     one = np.full((960, 540, 3), 90, np.uint8)
     cv2.putText(one, "down competitor ads", (40, 612), cv2.FONT_HERSHEY_DUPLEX, 1.4, (255, 255, 255), 4)
