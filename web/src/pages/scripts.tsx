@@ -1,5 +1,7 @@
-import { FileCheck2, Loader2 } from "lucide-react";
+import { Ellipsis, FileCheck2, Loader2, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Menu } from "@/components/menu";
+import { useItemActions } from "@/lib/actions";
 import { api, useApi, useEvents } from "@/lib/api";
 import { Link, navigate } from "@/lib/router";
 import { ago, cn } from "@/lib/utils";
@@ -19,6 +21,8 @@ export function ScriptsPage({ setTitle }: PageProps) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [menu, setMenu] = useState<{ x: number; y: number; s: ScriptSummary } | null>(null);
+  const act = useItemActions("scripts", reload);
   useEffect(() => { setTitle("Scripts"); }, [setTitle]);
   useEvents((t) => { if (t === "script") reload(); });
   const check = async () => {
@@ -51,6 +55,8 @@ export function ScriptsPage({ setTitle }: PageProps) {
                   <span className="min-w-0 flex-1 truncate">{s.title}</span>
                   <span className="caption">{s.status === "done" ? factLine(s.counts) : <span className="flex items-center gap-1"><Loader2 className="size-3 animate-spin" />Checking</span>}</span>
                   <span className="w-20 text-right caption">{ago(s.updatedAt)}</span>
+                  <button aria-label="More" onClick={(e) => { e.preventDefault(); const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setMenu({ x: r.right - 208, y: r.bottom + 4, s }); }}
+                    className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-foreground/8"><Ellipsis className="size-4" /></button>
                 </Link>
               </li>
             ))}
@@ -58,6 +64,11 @@ export function ScriptsPage({ setTitle }: PageProps) {
           </ul>
         </section>
       </div>
+      <Menu at={menu} onClose={() => setMenu(null)} items={menu ? [
+        { label: "Rename…", icon: <Pencil className="size-3.5" />, run: () => act.rename(menu.s.id, menu.s.title) },
+        { label: "Delete…", icon: <Trash2 className="size-3.5" />, danger: true, run: () => act.del([menu.s.id], menu.s.title) },
+      ] : []} />
+      {act.dialogs}
     </div>
   );
 }

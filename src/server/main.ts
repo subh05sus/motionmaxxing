@@ -7,6 +7,7 @@ import { Claude, type Ev, type SessionMeta } from "./claude.js";
 import * as demos from "./demos.js";
 import * as lib from "./library.js";
 import * as scripts from "./scripts.js";
+import * as bin from "./trash.js";
 import { CUT, EDITS, HOME, LIBRARY, PLUGIN, PORT, RECORDINGS, SETUP, VIDEOS, WEB_DIST, ensureDirs, python, slug } from "./paths.js";
 
 /**
@@ -328,18 +329,15 @@ const server = http.createServer(async (req, res) => {
           .finally(() => { jobs.delete(id); broadcast("video", { id }); });
         return sendJson(res, 202, { ok: true });
       }
-      if (action === "trash" && m === "POST") {
-        const r = lib.record(id);
+      if ((action === "delete" || action === "trash") && m === "POST") {
+        // Recently deleted (Undo, Restore), never rm. Its raw take goes too when it was added into the library.
         if (jobs.has(id)) return sendJson(res, 409, { error: "it is being rebuilt; try again in a moment" });
+        const r = lib.record(id);
         if (r.session) claude.stop(r.session);
-        const d = lib.editDir(id);
-        const out = await new Promise<number>((resolve) => {
-          const pr = spawn("osascript", ["-e", "on run argv", "-e", "set f to POSIX file (item 1 of argv) as alias", "-e", 'tell application "Finder" to delete f', "-e", "end run", d]);
-          pr.on("close", (c) => resolve(c ?? 1));
-        });
-        if (out) return sendJson(res, 500, { error: "Finder could not move it to the Trash" });
+        const src = r.source && path.resolve(r.source).startsWith(VIDEOS + path.sep) ? r.source : undefined;
+        const d = bin.trash("video", id, r.title, [lib.editDir(id), ...(src ? [src] : [])]);
         broadcast("video", { id });
-        return sendJson(res, 200, { ok: true });
+        return sendJson(res, 200, d);
       }
       if (action === "rename" && m === "POST") {
         const b = await body(req);
@@ -371,6 +369,19 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/chats") return sendJson(res, 200, claude.list());
 
+    // Recently deleted: videos, demos and scripts, restored as they were or handed to the Mac's Trash.
+    if (p === "/api/trash" && m === "GET") return sendJson(res, 200, bin.list());
+    if (seg[0] === "api" && seg[1] === "trash" && seg[2] && seg[3] === "restore" && m === "POST") {
+      try {
+        const r = bin.restore(seg[2]);
+        broadcast(r.kind, { id: r.id });
+        return sendJson(res, 200, r);
+      } catch (e) { return sendJson(res, 404, { error: (e as Error).message }); }
+    }
+    if (seg[0] === "api" && seg[1] === "trash" && seg[2] && seg[3] === "purge" && m === "POST") {
+      try { await bin.purge(seg[2]); return sendJson(res, 200, bin.list()); } catch (e) { return sendJson(res, 500, { error: (e as Error).message }); }
+    }
+
     // Scripts: pasted to check their facts before recording.
     if (p === "/api/scripts" && m === "GET") return sendJson(res, 200, scripts.list());
     if (p === "/api/scripts" && m === "POST") {
@@ -384,6 +395,20 @@ const server = http.createServer(async (req, res) => {
       claude.send(sid, "Check the facts in this script.", scripts.prompt(id));
       broadcast("script", { id });
       return sendJson(res, 201, { id, session: sid });
+    }
+    if (seg[0] === "api" && seg[1] === "scripts" && seg[2] && seg[3] === "delete" && m === "POST") {
+      if (!existsSync(scripts.scriptDir(seg[2]))) return sendJson(res, 404, { error: "no such script" });
+      const mt = scripts.meta(seg[2]);
+      if (mt.session) claude.stop(mt.session);
+      const d = bin.trash("script", seg[2], mt.title, [scripts.scriptDir(seg[2])]);
+      broadcast("script", { id: seg[2] });
+      return sendJson(res, 200, d);
+    }
+    if (seg[0] === "api" && seg[1] === "scripts" && seg[2] && seg[3] === "rename" && m === "POST") {
+      const b = await body(req), mt = scripts.meta(seg[2]);
+      mt.title = String(b.title ?? mt.title).trim().slice(0, 80) || mt.title; scripts.saveMeta(seg[2], mt);
+      broadcast("script", { id: seg[2] });
+      return sendJson(res, 200, scripts.summary(seg[2]));
     }
     if (seg[0] === "api" && seg[1] === "scripts" && seg[2] && m === "GET") {
       if (!existsSync(scripts.scriptDir(seg[2]))) return sendJson(res, 404, { error: "no such script" });
@@ -420,6 +445,19 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ...s, chat: c ? { id: c.id, status: c.status } : null });
       }
       if (seg[3] === "reveal" && m === "POST") { spawn("open", [demos.demoDir(id)], { stdio: "ignore", detached: true }).unref(); return sendJson(res, 200, { ok: true }); }
+      if (seg[3] === "delete" && m === "POST") {
+        const br = demos.brief(id);
+        if (br.session) claude.stop(br.session);
+        const d = bin.trash("demo", id, br.title, [demos.demoDir(id)]);
+        broadcast("demo", { id });
+        return sendJson(res, 200, d);
+      }
+      if (seg[3] === "rename" && m === "POST") {
+        const b = await body(req), br = demos.brief(id);
+        br.title = String(b.title ?? br.title).trim().slice(0, 80) || br.title; demos.saveBrief(id, br);
+        broadcast("demo", { id });
+        return sendJson(res, 200, demos.summary(id));
+      }
     }
     if (p === "/api/recorder/sites" && m === "GET") {
       try { return sendJson(res, 200, JSON.parse(readFileSync(path.join(HOME, "recorder", "sites.json"), "utf8"))); } catch { return sendJson(res, 200, {}); }

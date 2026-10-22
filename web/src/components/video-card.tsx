@@ -1,6 +1,9 @@
-import { Film, Loader2 } from "lucide-react";
+import { Check, Ellipsis, Film, FolderOpen, Loader2, Pencil, Play, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
-import { Link } from "@/lib/router";
+import { useState } from "react";
+import { Menu } from "@/components/menu";
+import { api } from "@/lib/api";
+import { Link, navigate } from "@/lib/router";
 import { SPRING_SNAPPY, staggerDelay } from "@/lib/motion";
 import { ago, clock, cn } from "@/lib/utils";
 
@@ -20,12 +23,38 @@ export const STATUS: Record<string, { label: string; tone: string }> = {
   approved: { label: "Approved", tone: "text-muted-foreground" },
 };
 
-export function VideoCard({ v, index = 0 }: { v: VideoSummary; index?: number }) {
+export interface CardActions { rename: (id: string, title: string) => void; del: (ids: string[], title: string) => void }
+
+export function VideoCard({ v, index = 0, actions, selecting, selected, onSelect }: { v: VideoSummary; index?: number; actions?: CardActions;
+  selecting?: boolean; selected?: boolean; onSelect?: (on: boolean) => void }) {
   const st = STATUS[v.status] ?? STATUS.new!;
   const working = v.status === "transcribing" || v.status === "cutting" || v.status === "making";
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const href = `/videos/${encodeURIComponent(v.id)}`;
+  const items = actions ? [
+    { label: "Open", icon: <Play className="size-3.5" />, run: () => navigate(href) },
+    { label: "Rename…", icon: <Pencil className="size-3.5" />, run: () => actions.rename(v.id, v.title) },
+    { label: "Show in Finder", icon: <FolderOpen className="size-3.5" />, run: () => void api("/api/reveal", { json: { id: v.id } }) },
+    { label: "Delete…", icon: <Trash2 className="size-3.5" />, danger: true, run: () => actions.del([v.id], v.title) },
+  ] : [];
   return (
-    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ ...SPRING_SNAPPY, delay: staggerDelay(index) }}>
-      <Link href={`/videos/${encodeURIComponent(v.id)}`} className="group block rounded-[12px] p-1.5 hover:bg-foreground/5 active:scale-[0.985] transition-transform">
+    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ ...SPRING_SNAPPY, delay: staggerDelay(index) }}
+      onContextMenu={(e) => { if (!actions) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }} className="group/card relative">
+      <Menu at={menu} items={items} onClose={() => setMenu(null)} />
+      {actions && !selecting && (
+        <button aria-label="More" onClick={(e) => { e.preventDefault(); const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setMenu({ x: r.left, y: r.bottom + 4 }); }}
+          className="absolute top-3 right-3 z-10 grid size-7 place-items-center rounded-full bg-black/55 text-white opacity-0 backdrop-blur transition-opacity hover:bg-black/70 focus-visible:opacity-100 group-hover/card:opacity-100 pointer-coarse:opacity-100">
+          <Ellipsis className="size-4" />
+        </button>
+      )}
+      {selecting && (
+        <button aria-label={selected ? "Deselect" : "Select"} onClick={() => onSelect?.(!selected)}
+          className={cn("absolute top-3 left-3 z-10 grid size-6 place-items-center rounded-full border-2 border-white shadow", selected ? "bg-primary" : "bg-black/30")}>
+          {selected && <Check className="size-3.5 text-white" strokeWidth={3} />}
+        </button>
+      )}
+      <Link href={href} onClick={(e) => { if (selecting) { e.preventDefault(); onSelect?.(!selected); } }}
+        className={cn("group block rounded-[12px] p-1.5 hover:bg-foreground/5 active:scale-[0.985] transition-transform", selected && "bg-primary/12 ring-2 ring-primary")}>
         <div className="relative aspect-[9/16] w-full overflow-hidden rounded-[9px] bg-card-2">
           {v.media.poster ? <img src={v.media.poster} alt="" loading="lazy" className="size-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} /> : null}
           <div className="pointer-events-none absolute inset-0 grid place-items-center text-faint-foreground"><Film className="size-6 opacity-0 group-[&:not(:has(img))]:opacity-100" /></div>

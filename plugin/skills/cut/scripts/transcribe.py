@@ -10,7 +10,8 @@
                                               when it holds more words (verify_cut's SURVIVED with "a word label is
                                               off": a repeat the first pass wrote once)
     python transcribe.py heal <edit dir> [--ranges A-B,C-D] [--source <media>]
-                                              hear the take again in 10 s pieces (verbatim) and take those words where
+                                              hear the take again island by island (each stretch of speech between two
+                                              pauses on its own, verbatim) and take those words where
                                               the first pass was wrong: a retake it wrote once, words it squeezed into
                                               a frame or two. --ranges adds stretches (source seconds) verify_cut heard
                                               in the cut. Run it right after transcribing, before retakes.py propose.
@@ -543,6 +544,55 @@ def voiced(wav, frame_s=0.05):
     return [d > floor + 12 for d in db], frame_s
 
 
+def islands(voice, frame_s, a=0.0, b=None, gap_s=0.25, longest=12.0):
+    """[(start, end)] the voiced islands between a and b: speech parted by pauses of gap_s or more (a retake starts
+    after one). An island over `longest` is split at its quietest-looking pause-free middle (it keeps its words)."""
+    b = len(voice) * frame_s if b is None else b
+    out, cur, gap = [], None, 0.0
+    for k in range(int(a / frame_s), min(len(voice), int(b / frame_s) + 1)):
+        t = k * frame_s
+        if voice[k]:
+            cur = [t, t + frame_s] if cur is None else [cur[0], t + frame_s]
+            gap = 0.0
+        elif cur is not None:
+            gap += frame_s
+            if gap >= gap_s:
+                out.append(tuple(cur))
+                cur, gap = None, 0.0
+    if cur:
+        out.append(tuple(cur))
+    split = []
+    for s_, e_ in out:
+        n = max(1, int((e_ - s_) // longest) + 1)
+        step = (e_ - s_) / n
+        split += [(s_ + i * step, s_ + (i + 1) * step) for i in range(n)]
+    return split
+
+
+def cpp_islands(wav, code, prompt, voice, frame_s, a=0.0, b=None):
+    """The words of [a, b], each voiced island heard on its own (Whisper cannot fold a retake into the take before
+    it when it never hears them together): the most verbatim hearing, its times held inside each island."""
+    isl = [(s_, e_) for s_, e_ in islands(voice, frame_s, a, b) if e_ - s_ >= 0.2]
+    if not isl:
+        return []
+    with tempfile.TemporaryDirectory() as tmp:
+        files = []
+        for i, (s_, e_) in enumerate(isl):
+            f = Path(tmp) / f"i{i:04d}.wav"
+            cut_wav(wav, max(0.0, s_ - 0.15), (e_ - s_) + 0.3, f)
+            files.append(f)
+        payloads = cpp_files(files, code, prompt)
+    words = []
+    for (s_, e_), payload in zip(isl, payloads):
+        o = max(0.0, s_ - 0.15)
+        for w in cpp_words(payload):
+            st, en = w["start"] + o, w["end"] + o
+            w = dict(w, start=round(min(max(st, s_), e_), 3), end=round(min(max(en, s_), e_ + 0.1), 3))
+            words.append(w)
+    words.sort(key=lambda w: w["start"])
+    return words
+
+
 def on_voice(w, voice, frame_s):
     """The word sits where the voice is on (a word Whisper heard in a silence is made up)."""
     i, j = int(w["start"] / frame_s), int(w["end"] / frame_s) + 1
@@ -624,10 +674,28 @@ def heal(edit, ranges=(), source=None):
         total = wav_seconds(wav)
         voice, fs = voiced(wav)
         progress.step("Hearing the take again, word for word", key=str(edit))
-        verbatim = [w for w in cpp_pieces(wav, code, prompt, 0.0, total) if on_voice(w, voice, fs)]
-        todo = [(a, b, verbatim, "verbatim") for a, b in to_heal(words, verbatim, total, voice, fs)]
+        verbatim = [w for w in cpp_islands(wav, code, prompt, voice, fs, 0.0, total) if on_voice(w, voice, fs)]
+        # Whole islands only: a stretch that ends inside an island would keep the first pass's words for part of it
+        # and the island's own for the rest, and a phrase on the seam comes back twice ("und dann lässt du ihn
+        # eine" heard by both, the cut then keeping the copy whose times were wrong).
+        isl = islands(voice, fs)
+        def snap(a, b):
+            for s_, e_ in isl:
+                if s_ <= a <= e_:
+                    a = s_
+                if s_ <= b <= e_:
+                    b = e_
+            return max(0.0, a - 0.05), b + 0.05
+        todo = []
+        for a, b in to_heal(words, verbatim, total, voice, fs):
+            a, b = snap(a, b)
+            if todo and a <= todo[-1][1]:
+                todo[-1] = (todo[-1][0], max(todo[-1][1], b), verbatim, "verbatim")
+            else:
+                todo.append((a, b, verbatim, "verbatim"))
         for a, b in ranges:
-            todo.append((a, b, [w for w in cpp_pieces(wav, code, prompt, a, b) if on_voice(w, voice, fs)], "heard in the cut"))
+            a, b = snap(a, b)
+            todo.append((a, b, [w for w in cpp_islands(wav, code, prompt, voice, fs, a, b) if on_voice(w, voice, fs)], "heard in the cut"))
     fixed = 0
     for a, b, new, why in todo:
         words, done = patch(words, a, b, new, times=True)

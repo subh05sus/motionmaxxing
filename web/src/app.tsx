@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { Command, FileCheck2, Film, House, Library, MonitorPlay, Palette, PanelLeft, PanelRight, Plus, Search, Settings } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Celebrate, type Moment } from "@/components/celebrate";
+import { Toaster } from "@/components/toaster";
 import { ChatPanel } from "@/components/chat";
 import { Palette as CommandPalette } from "@/components/palette";
 import { api, useApi, useEvents } from "@/lib/api";
@@ -149,6 +150,7 @@ export function App() {
       </div>
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
       <Celebrate moment={moment} onDone={clearMoment} />
+      <Toaster />
       {/* Phone: a floating tab bar of glass, iOS style. */}
       <nav className="liquid-glass fixed inset-x-4 bottom-[max(env(safe-area-inset-bottom),12px)] z-40 flex h-[62px] items-center justify-around rounded-full md:hidden">
         {NAV.slice(0, 3).concat({ href: "/settings", label: "Settings", icon: Settings }).map(({ href, label, icon: Icon }) => {

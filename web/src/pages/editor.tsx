@@ -1,10 +1,13 @@
 import { AnimatePresence, motion } from "motion/react";
-import { Check, Info, Loader2, MessageSquare, Pause, Play, Scissors, Send, Share, StickyNote, Trash2, Undo2 } from "lucide-react";
+import { Check, Ellipsis, FolderOpen, Info, Loader2, MessageSquare, Pause, Pencil, Play, Scissors, Send, Share, StickyNote, Trash2, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChatPanel, StatusDot } from "@/components/chat";
 import { GlassSegmented } from "@/components/ui/glass-segmented";
 import { STATUS, type VideoSummary } from "@/components/video-card";
+import { Menu } from "@/components/menu";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { useItemActions } from "@/lib/actions";
+import { navigate } from "@/lib/router";
 import { api, useApi, useEvents } from "@/lib/api";
 import { Link } from "@/lib/router";
 import { SPRING_DEFAULT, SPRING_SNAPPY } from "@/lib/motion";
@@ -261,7 +264,8 @@ function Inspector({ v }: { v: Detail }) {
 
 /** The editor: the video in the middle, the transcript on the left, Claude, notes and facts on the right, the timeline below. */
 export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string; chatOpen: boolean }) {
-  const { data: v, reload } = useApi<Detail>(`/api/videos/${encodeURIComponent(id)}`, [id]);
+  const { data: v, reload, error } = useApi<Detail>(`/api/videos/${encodeURIComponent(id)}`, [id]);
+  const gone = !!error && /no such video/.test(error);
   useEvents((t, d) => { if (t === "video" && d?.id === id) reload(); });
   const player = useRef<HTMLVideoElement>(null);
   const [view, setView] = useState<"edit" | "cut" | "raw">("edit");
@@ -290,6 +294,13 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
   const working = !!v?.job || v?.progress && !v.progress.done && !v.progress.failed && Date.now() / 1000 - v.progress.t < 900 && (v.status === "transcribing" || v.status === "cutting" || v.status === "making");
   const wide = useMediaQuery("(min-width: 1024px)");
   const [phoneTab, setPhoneTab] = useState<"notes" | "claude">("notes");
+  const [more, setMore] = useState<{ x: number; y: number } | null>(null);
+  const act = useItemActions("videos", reload);
+  const moreItems = [
+    { label: "Rename…", icon: <Pencil className="size-3.5" />, run: () => v && act.rename(id, v.title) },
+    { label: "Show in Finder", icon: <FolderOpen className="size-3.5" />, run: () => void api("/api/reveal", { json: { id } }) },
+    { label: "Delete…", icon: <Trash2 className="size-3.5" />, danger: true, run: () => v && act.del([id], v.title) },
+  ];
   const approve = async (stage: "cut" | "edit") => {
     setApproving(true);
     try { await api(`/api/videos/${encodeURIComponent(id)}/approve`, { json: { stage } }); if (stage === "cut") setView("edit"); reload(); }
@@ -307,6 +318,8 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
         {hasCut && v.status === "ready" && (
           <button disabled={approving} onClick={() => approve("cut")} title="Approve the cut, and Claude makes the edit on top" className="flex h-7 items-center gap-1 rounded-md bg-primary px-3 font-medium text-primary-foreground active:scale-[0.97]"><Check className="size-3.5" />{wide ? "Approve the cut" : "Approve"}</button>
         )}
+        <button aria-label="More" onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setMore({ x: r.right - 208, y: r.bottom + 4 }); }}
+          className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-foreground/8"><Ellipsis className="size-4" /></button>
         {hasEdit && (
           <button disabled={!!v.job} onClick={() => void api(`/api/videos/${encodeURIComponent(id)}/export`, { method: "POST" }).then(reload).catch((e: Error) => alert(e.message))}
             title="Final Cut, Premiere, Resolve, CapCut and a folder for an editor" className="flex h-7 items-center gap-1.5 rounded-md px-2.5 hover:bg-foreground/8 disabled:opacity-40">
@@ -319,6 +332,8 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
       </div>,
     );
   }, [v, view, showing, hasCut, hasEdit, approving, working, id, reload, setTitle, wide]);
+  // the video was deleted (here or in another window): back to the list
+  useEffect(() => { if (gone) navigate("/videos", true); }, [gone]);
   if (!v) return <div className="grid h-full place-items-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>;
   const sid = v.chat?.id ?? v.session ?? `v_${id}`;
   const total = onCut ? maps.total || v.seconds.cut || 0 : v.seconds.source ?? 0;
@@ -330,9 +345,11 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
   );
 
   // Phone and narrow windows: watch, leave notes, approve (the desktop is where the cut is changed by hand).
+  const overlays = <><Menu at={more} items={moreItems} onClose={() => setMore(null)} />{act.dialogs}</>;
   if (!wide) {
     return (
       <div className="h-full overflow-y-auto pb-28">
+        {overlays}
         <div className="mx-auto max-w-[560px] space-y-3 px-4 pt-3">
           {hasCut && <div className="flex justify-center"><GlassSegmented value={showing} onChange={(x) => setView(x as "edit" | "cut" | "raw")} options={viewOptions} /></div>}
           <div className="relative h-[64vh]"><Player src={src} poster={v.media.poster} playerRef={player} onTime={onTime} />{progressPill}</div>
@@ -347,6 +364,7 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
 
   return (
     <div className="flex h-full flex-col">
+      {overlays}
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-[300px] shrink-0 flex-col border-r">
           <div className="flex h-9 shrink-0 items-center justify-between border-b px-3">

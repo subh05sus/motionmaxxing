@@ -1,7 +1,9 @@
-import { Globe, Loader2, MonitorPlay, Sparkles } from "lucide-react";
+import { Ellipsis, FolderOpen, Globe, Loader2, MonitorPlay, Pencil, Sparkles, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
+import { Menu } from "@/components/menu";
 import { GlassSegmented } from "@/components/ui/glass-segmented";
+import { useItemActions } from "@/lib/actions";
 import { api, useApi, useEvents } from "@/lib/api";
 import { Link, navigate } from "@/lib/router";
 import { SPRING_SNAPPY, staggerDelay } from "@/lib/motion";
@@ -35,6 +37,8 @@ export function DemosPage({ setTitle }: PageProps) {
   const [formats, setFormats] = useState<"both" | "wide" | "tall">("both");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [menu, setMenu] = useState<{ x: number; y: number; d: Demo } | null>(null);
+  const act = useItemActions("demos", reload);
   useEffect(() => { setTitle("Demos"); }, [setTitle]);
   useEvents((t) => { if (t === "demo") reload(); });
   const start = async () => {
@@ -78,7 +82,10 @@ export function DemosPage({ setTitle }: PageProps) {
           {data?.length ? (
             <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
               {data.map((d, i) => (
-                <motion.div key={d.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ ...SPRING_SNAPPY, delay: staggerDelay(i) }}>
+                <motion.div key={d.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ ...SPRING_SNAPPY, delay: staggerDelay(i) }}
+                  className="group/card relative" onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, d }); }}>
+                  <button aria-label="More" onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setMenu({ x: r.left, y: r.bottom + 4, d }); }}
+                    className="absolute top-3 right-3 z-10 grid size-7 place-items-center rounded-full bg-black/55 text-white opacity-0 transition-opacity group-hover/card:opacity-100 pointer-coarse:opacity-100"><Ellipsis className="size-4" /></button>
                   <Link href={`/demos/${encodeURIComponent(d.id)}`} className="block rounded-[12px] p-1.5 transition-transform hover:bg-foreground/5 active:scale-[0.985]">
                     <div className="relative aspect-video overflow-hidden rounded-[9px] bg-card-2">
                       {d.media.poster ? <img src={d.media.poster} alt="" loading="lazy" className="size-full object-cover" /> : <div className="grid size-full place-items-center text-faint-foreground"><MonitorPlay className="size-6" /></div>}
@@ -97,6 +104,12 @@ export function DemosPage({ setTitle }: PageProps) {
             </div>
           ) : <p className="text-muted-foreground">{data ? "No demos yet." : "Loading…"}</p>}
         </section>
+        <Menu at={menu} onClose={() => setMenu(null)} items={menu ? [
+          { label: "Rename…", icon: <Pencil className="size-3.5" />, run: () => act.rename(menu.d.id, menu.d.title) },
+          { label: "Show in Finder", icon: <FolderOpen className="size-3.5" />, run: () => void api(`/api/demos/${encodeURIComponent(menu.d.id)}/reveal`, { method: "POST" }) },
+          { label: "Delete…", icon: <Trash2 className="size-3.5" />, danger: true, run: () => act.del([menu.d.id], menu.d.title) },
+        ] : []} />
+        {act.dialogs}
       </div>
     </div>
   );

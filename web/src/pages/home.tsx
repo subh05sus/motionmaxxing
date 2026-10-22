@@ -2,6 +2,7 @@ import { ArrowRight, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { DropZone } from "@/components/drop-zone";
 import { VideoCard, type VideoSummary } from "@/components/video-card";
+import { useItemActions } from "@/lib/actions";
 import { upload, useApi, useEvents } from "@/lib/api";
 import { Link, navigate } from "@/lib/router";
 import type { PageProps } from "@/app";
@@ -11,6 +12,7 @@ export function HomePage({ setTitle }: PageProps) {
   const { data, reload } = useApi<VideoSummary[]>("/api/videos");
   const [busy, setBusy] = useState(false);
   const [pct, setPct] = useState(0);
+  const act = useItemActions("videos", reload);
   useEffect(() => { setTitle("Home"); }, [setTitle]);
   useEvents((t) => { if (t === "video") reload(); });
   const add = async (f: File) => {
@@ -30,11 +32,12 @@ export function HomePage({ setTitle }: PageProps) {
           {recent.length > 0 && <Link href="/videos" className="flex items-center gap-1 text-primary hover:underline">All videos <ArrowRight className="size-3.5" /></Link>}
         </div>
         {recent.length ? (
-          <div className="grid grid-cols-2 gap-1 sm:grid-cols-4 lg:grid-cols-5">{recent.map((v, i) => <VideoCard key={v.id} v={v} index={i} />)}</div>
+          <div className="grid grid-cols-2 gap-1 sm:grid-cols-4 lg:grid-cols-5">{recent.map((v, i) => <VideoCard key={v.id} v={v} index={i} actions={act} />)}</div>
         ) : (
           <div className="panel flex items-center gap-3 p-4 text-muted-foreground"><Sparkles className="size-4 text-primary" />Your videos show up here once you add one.</div>
         )}
       </div>
+      {act.dialogs}
     </div>
   );
 }
