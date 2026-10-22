@@ -1,0 +1,244 @@
+/*
+ * apple-glass kit: Apple's colours as CSS custom properties, light and dark.
+ *
+ * Sources (checked 2026-10-06):
+ *   - System colours and greys: Apple HIG > Color > Specifications (the
+ *     iOS 26 / macOS Tahoe palette, incl. Increase Contrast variants).
+ *   - Backgrounds, labels, fills, separators: UIKit's dynamic colours (the
+ *     values the iOS SDK resolves them to; Apple doesn't print them in the HIG).
+ *   - macOS desktop values: AppKit's dynamic colours (macOS 14-15; approximate
+ *     on Tahoe; verify in Xcode's colour panel > Developer palette).
+ * Apple warns these can shift between releases: re-check when a new OS ships.
+ *
+ * How to use: import after the app's own tokens, then point the app's
+ * semantic tokens at these (the shadcn mapping is at the bottom; uncomment
+ * what you adopt). Keep the product's own accent as --primary.
+ */
+
+:root {
+  /* ---- Backgrounds: system set (plain screens) ---- */
+  --apple-bg: #ffffff; /* systemBackground */
+  --apple-bg-2: #f2f2f7; /* secondarySystemBackground */
+  --apple-bg-3: #ffffff; /* tertiarySystemBackground */
+
+  /* ---- Backgrounds: grouped set (settings-style inset lists) ---- */
+  --apple-grouped-bg: #f2f2f7; /* systemGroupedBackground: the page */
+  --apple-grouped-bg-2: #ffffff; /* secondary: the rounded group */
+  --apple-grouped-bg-3: #f2f2f7; /* tertiary: inside a group */
+
+  /* ---- Elevated: anything presented above the base (sheets, popovers,
+     dialogs). Same as base in light mode; brighter in dark mode. ---- */
+  --apple-elevated-bg: #ffffff;
+  --apple-elevated-bg-2: #f2f2f7;
+  --apple-elevated-bg-3: #ffffff;
+
+  /* ---- Labels (text and symbols) ---- */
+  --apple-label: #000000;
+  --apple-label-2: rgb(60 60 67 / 0.6);
+  --apple-label-3: rgb(60 60 67 / 0.3);
+  --apple-label-4: rgb(60 60 67 / 0.18);
+  --apple-placeholder: rgb(60 60 67 / 0.3);
+  --apple-link: rgb(0 136 255);
+
+  /* ---- Fills (controls, chips, tracks) — translucent, so they work on
+     any background. 1 = thin/small shapes ... 4 = large areas. ---- */
+  --apple-fill: rgb(120 120 128 / 0.2);
+  --apple-fill-2: rgb(120 120 128 / 0.16);
+  --apple-fill-3: rgb(118 118 128 / 0.12);
+  --apple-fill-4: rgb(116 116 128 / 0.08);
+
+  /* ---- Separators ---- */
+  --apple-separator: rgb(60 60 67 / 0.29); /* lets content show through */
+  --apple-separator-opaque: #c6c6c8;
+
+  /* ---- System colours (HIG, default light) ---- */
+  --apple-red: rgb(255 56 60);
+  --apple-orange: rgb(255 141 40);
+  --apple-yellow: rgb(255 204 0);
+  --apple-green: rgb(52 199 89);
+  --apple-mint: rgb(0 200 179);
+  --apple-teal: rgb(0 195 208);
+  --apple-cyan: rgb(0 192 232);
+  --apple-blue: rgb(0 136 255);
+  --apple-indigo: rgb(97 85 245);
+  --apple-purple: rgb(203 48 224);
+  --apple-pink: rgb(255 45 85);
+  --apple-brown: rgb(172 127 94);
+
+  /* ---- System greys (iOS) ---- */
+  --apple-gray: rgb(142 142 147);
+  --apple-gray-2: rgb(174 174 178);
+  --apple-gray-3: rgb(199 199 204);
+  --apple-gray-4: rgb(209 209 214);
+  --apple-gray-5: rgb(229 229 234);
+  --apple-gray-6: rgb(242 242 247);
+
+  /* ---- macOS (desktop) neutrals, light ---- */
+  --mac-window: #ececec; /* windowBackgroundColor */
+  --mac-content: #ffffff; /* controlBackgroundColor / textBackgroundColor */
+  --mac-under-page: #969696; /* underPageBackgroundColor */
+  --mac-label: rgb(0 0 0 / 0.85); /* labelColor: not pure black on macOS */
+  --mac-label-2: rgb(0 0 0 / 0.5);
+  --mac-label-3: rgb(0 0 0 / 0.26);
+  --mac-label-4: rgb(0 0 0 / 0.1);
+  --mac-separator: rgb(0 0 0 / 0.1);
+  --mac-selection: #0063e1; /* selectedContentBackgroundColor (key window) */
+  --mac-selection-muted: #dcdcdc; /* unemphasized (window not key) */
+}
+
+.dark {
+  /* Base: recedes. Pure black on phones (OLED), as iOS does. */
+  --apple-bg: #000000;
+  --apple-bg-2: #1c1c1e;
+  --apple-bg-3: #2c2c2e;
+
+  --apple-grouped-bg: #000000;
+  --apple-grouped-bg-2: #1c1c1e;
+  --apple-grouped-bg-3: #2c2c2e;
+
+  /* Elevated: advances. A sheet on a black page must use these, or it
+     merges with the page behind it. */
+  --apple-elevated-bg: #1c1c1e;
+  --apple-elevated-bg-2: #2c2c2e;
+  --apple-elevated-bg-3: #3a3a3c;
+
+  --apple-label: #ffffff;
+  --apple-label-2: rgb(235 235 245 / 0.6);
+  --apple-label-3: rgb(235 235 245 / 0.3);
+  --apple-label-4: rgb(235 235 245 / 0.18);
+  --apple-placeholder: rgb(235 235 245 / 0.3);
+  --apple-link: rgb(0 145 255);
+
+  --apple-fill: rgb(120 120 128 / 0.36);
+  --apple-fill-2: rgb(120 120 128 / 0.32);
+  --apple-fill-3: rgb(118 118 128 / 0.24);
+  --apple-fill-4: rgb(118 118 128 / 0.18);
+
+  --apple-separator: rgb(84 84 88 / 0.6);
+  --apple-separator-opaque: #38383a;
+
+  /* System colours (HIG, default dark): brighter, not inverted. */
+  --apple-red: rgb(255 66 69);
+  --apple-orange: rgb(255 146 48);
+  --apple-yellow: rgb(255 214 0);
+  --apple-green: rgb(48 209 88);
+  --apple-mint: rgb(0 218 195);
+  --apple-teal: rgb(0 210 224);
+  --apple-cyan: rgb(60 211 254);
+  --apple-blue: rgb(0 145 255);
+  --apple-indigo: rgb(109 124 255);
+  --apple-purple: rgb(219 52 242);
+  --apple-pink: rgb(255 55 95);
+  --apple-brown: rgb(183 138 102);
+
+  --apple-gray: rgb(142 142 147);
+  --apple-gray-2: rgb(99 99 102);
+  --apple-gray-3: rgb(72 72 74);
+  --apple-gray-4: rgb(58 58 60);
+  --apple-gray-5: rgb(44 44 46);
+  --apple-gray-6: rgb(28 28 30);
+
+  /* macOS dark: graphite, never pure black; labels at 85% white. */
+  --mac-window: #323232;
+  --mac-content: #1e1e1e;
+  --mac-under-page: #282828;
+  --mac-label: rgb(255 255 255 / 0.85);
+  --mac-label-2: rgb(255 255 255 / 0.55);
+  --mac-label-3: rgb(255 255 255 / 0.25);
+  --mac-label-4: rgb(255 255 255 / 0.1);
+  --mac-separator: rgb(255 255 255 / 0.1);
+  --mac-selection: #0058d0;
+  --mac-selection-muted: #464646;
+}
+
+/* Increase Contrast: Apple's high-contrast system colours (HIG). */
+@media (prefers-contrast: more) {
+  :root {
+    --apple-red: rgb(233 21 45);
+    --apple-orange: rgb(197 83 0);
+    --apple-yellow: rgb(161 106 0);
+    --apple-green: rgb(0 137 50);
+    --apple-mint: rgb(0 133 117);
+    --apple-teal: rgb(0 129 152);
+    --apple-cyan: rgb(0 126 174);
+    --apple-blue: rgb(30 110 244);
+    --apple-indigo: rgb(86 74 222);
+    --apple-purple: rgb(176 47 194);
+    --apple-pink: rgb(231 18 77);
+    --apple-brown: rgb(149 109 81);
+    --apple-gray: rgb(108 108 112);
+    --apple-gray-2: rgb(142 142 147);
+    --apple-gray-3: rgb(174 174 178);
+    --apple-gray-4: rgb(188 188 192);
+    --apple-gray-5: rgb(216 216 220);
+    --apple-gray-6: rgb(235 235 240);
+  }
+  .dark {
+    --apple-red: rgb(255 97 101);
+    --apple-orange: rgb(255 160 86);
+    --apple-yellow: rgb(254 223 67);
+    --apple-green: rgb(74 217 104);
+    --apple-mint: rgb(84 223 203);
+    --apple-teal: rgb(59 221 236);
+    --apple-cyan: rgb(109 217 255);
+    --apple-blue: rgb(92 184 255);
+    --apple-indigo: rgb(167 170 255);
+    --apple-purple: rgb(234 141 255);
+    --apple-pink: rgb(255 138 196);
+    --apple-brown: rgb(219 166 121);
+    --apple-gray: rgb(174 174 178);
+    --apple-gray-2: rgb(124 124 128);
+    --apple-gray-3: rgb(84 84 86);
+    --apple-gray-4: rgb(68 68 70);
+    --apple-gray-5: rgb(54 54 56);
+    --apple-gray-6: rgb(36 36 38);
+  }
+}
+
+/*
+ * ---- Mapping onto shadcn / Tailwind v4 tokens --------------------------
+ * Uncomment what the product adopts (an owner decision: it changes how every
+ * page looks). Keeps the product's accent; Apple apps keep theirs too.
+ *
+ * :root {
+ *   --background: var(--apple-bg);
+ *   --foreground: var(--apple-label);
+ *   --card: var(--apple-grouped-bg-2);
+ *   --card-foreground: var(--apple-label);
+ *   --popover: var(--apple-elevated-bg);
+ *   --popover-foreground: var(--apple-label);
+ *   --secondary: var(--apple-fill-3);
+ *   --secondary-foreground: var(--apple-label);
+ *   --muted: var(--apple-fill-4);
+ *   --muted-foreground: var(--apple-label-2);
+ *   --accent: var(--apple-fill-3);
+ *   --accent-foreground: var(--apple-label);
+ *   --border: var(--apple-separator);
+ *   --input: var(--apple-separator);
+ *   --destructive: var(--apple-red);
+ *   --success: var(--apple-green);
+ *   --warning: var(--apple-orange);
+ *   --chart-1: var(--apple-blue);
+ *   --chart-2: var(--apple-green);
+ *   --chart-3: var(--apple-orange);
+ *   --chart-4: var(--apple-purple);
+ *   --chart-5: var(--apple-teal);
+ * }
+ * .dark {
+ *   --popover: var(--apple-elevated-bg-2);  menus over an elevated sheet
+ * }
+ *
+ * Desktop as macOS (the "graphite on desktop" choice): phones keep the iOS
+ * black; wide screens take the Mac's window greys and 85% labels.
+ *
+ * @media (min-width: 1024px) {
+ *   .dark {
+ *     --background: var(--mac-content);
+ *     --card: color-mix(in srgb, white 5%, var(--mac-content));
+ *     --popover: var(--mac-window);
+ *     --foreground: var(--mac-label);
+ *     --muted-foreground: var(--mac-label-2);
+ *     --border: var(--mac-separator);
+ *   }
+ * }
+ */

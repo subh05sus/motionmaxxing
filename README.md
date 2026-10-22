@@ -20,6 +20,31 @@ It runs on your Mac with your own Claude login. No API keys, no paid services.
 
 German first: the cut knows German fillers ("äh", "ähm"), restarts ("warte", "nochmal") and number words.
 
+## Start
+
+On a Mac with [Claude Code](https://claude.com/claude-code) signed in, and Node 20 or newer:
+
+```bash
+git clone https://github.com/subh05sus/motionmaxxing && cd motionmaxxing
+npm install
+bin/mm          # starts the studio and opens it: http://localhost:5199
+bin/mm app      # optional: motionmaxxing.app in ~/Applications, for the Dock
+```
+
+The first run checks the Mac and installs what is missing in one click (ffmpeg, whisper.cpp, the editing tools and
+the transcription model). Then drop a raw take on Home.
+
+The studio:
+
+- **New video**: the raw take, an optional script, a note for Claude, and one button.
+- **The editor**: the video in the middle, the transcript on the left with every cut word struck through (select
+  words to cut them or bring them back), Claude, your notes and the facts on the right, the timeline below. Notes are
+  pinned to a moment and go to Claude together. Claude's questions show up as cards.
+- **Styles**, **Library**, **Settings**. ⌘K finds anything, ⌘B folds the sidebar, ⌘/ shows or hides Claude.
+- On a phone: watch, leave notes and approve.
+
+Everything stays on the Mac, in `~/Movies/motionmaxxing`.
+
 ## Status
 
 Early, built in phases: [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -29,7 +54,9 @@ Early, built in phases: [docs/ROADMAP.md](docs/ROADMAP.md).
 | Folder | What |
 |---|---|
 | `plugin/` | A Claude Code plugin: the skills Claude follows, its agents, and the Python and Node tools they run (cut, edit, render, record). The studio's Claude loads it; Claude Code can use it directly. |
-| `src/` | The studio: a local TypeScript server that runs Claude on your login, and the interface. |
+| `src/server/` | The studio's server: runs Claude Code through the Agent SDK on your login, the library's videos, live events. Local only (127.0.0.1). |
+| `web/` | The studio's interface: React, Tailwind and Apple's dark palette, glass only on floating controls. |
+| `bin/mm` | Starts and opens the studio; `scripts/make-app.sh` makes the Dock app. |
 
 ## License
 

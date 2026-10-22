@@ -1,0 +1,55 @@
+/* From the apple-glass design kit (keyboard focus). */
+/* ------------------------------ Keyboard focus ----------------------------- */
+/*
+ * One focus ring for keyboard users (WCAG 2.4.7): 2px in the ring colour, 2px
+ * off the control. :focus-visible only, so a tap or a click never shows it.
+ * Unlayered on purpose: it has to win over the `outline-none` utility.
+ *
+ * `.focus-ring` is the Button primitive's (components/ui/button.tsx); a
+ * caller's own focus-visible: classes still win over it.
+ */
+.focus-ring:focus-visible:not([class*="focus-visible:"]) {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.focus-ring.focus-ring-destructive:focus-visible:not(
+    [class*="focus-visible:"]
+  ) {
+  outline-color: var(--destructive);
+}
+
+/*
+ * The same ring for controls that removed the browser outline (`outline-none`)
+ * and draw nothing in its place. Anything with an indicator of its own keeps
+ * it: a focus-visible: or focus: utility (ring, background, border...), a
+ * Radix item's highlight, or a ring drawn by a child (group-focus-visible:,
+ * like the glass slider's). Text fields are left out: they always match
+ * :focus-visible and already show a caret. Kept apart from the rule above:
+ * a browser without :has() drops this one only.
+ */
+:is(
+    a[href],
+    button,
+    summary,
+    [role="button"],
+    [role="link"],
+    [role="tab"],
+    [role="switch"],
+    [role="checkbox"],
+    [role="radio"],
+    [role="menuitem"],
+    [role="menuitemcheckbox"],
+    [role="menuitemradio"],
+    [role="option"],
+    [role="treeitem"],
+    [tabindex]:not([tabindex="-1"], input, textarea, select, [contenteditable])
+  ):focus-visible:not(
+    .focus-ring,
+    [class*="focus-visible:"],
+    [class*="focus:"],
+    [class*="data-[highlighted]"],
+    :has([class*="group-focus-visible:"])
+  ) {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}

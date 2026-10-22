@@ -103,7 +103,7 @@ def load_md():
 def save_md(md):
     HOME.mkdir(parents=True, exist_ok=True)
     lines = ["# My editing taste", "",
-             "Rules I've given motionmaxxing It reads this before every edit.", ""]
+             "Rules I've given motionmaxxing. It reads this before every edit.", ""]
     for s, rules in md.items():
         lines += [f"## {s}", ""] + [f"- {r}" for r in rules] + [""]
     md_path().write_text("\n".join(lines), encoding="utf-8")

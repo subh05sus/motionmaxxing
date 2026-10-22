@@ -1,6 +1,6 @@
 ---
 name: cut
-description: Cuts raw talking-head footage into a clean jump cut. Takes one take or several joined (mp4 or mov, any aspect, 4K phone footage is fine), transcribes it word by word, removes retakes, false starts, fillers and dead pauses, and renders cut.mp4 at the source resolution plus words.json timed to the cut. The user approves the cut on a page with the whole transcript and every removed word struck through. Use when the user says "cut my video", "just cut it", "remove my mistakes", "cut out the retakes", "remove the pauses", "clean up this take", "jump cut this", "tighten this clip", or asks only for the cut of a raw take; start calls it for a full edit. Runs before style-edit. Not for a general request to edit a video or to make it look like a creator (that is start), not for adding captions, zooms or cards (style-edit), and not for analysing someone else's videos (creator-teardown).
+description: Cuts raw talking-head footage into a clean jump cut. Takes one take or several joined (mp4 or mov, any aspect, 4K phone footage is fine), transcribes it word by word, removes retakes, false starts, fillers and dead pauses, and renders cut.mp4 at the source resolution plus words.json timed to the cut. The user approves the cut on a page with the whole transcript and every removed word struck through. Use when the user says "cut my video", "just cut it", "remove my mistakes", "cut out the retakes", "remove the pauses", "clean up this take", "jump cut this", "tighten this clip", or asks only for the cut of a raw take; start calls it for a full edit. Runs before edit. Not for a general request to edit a video or to make it look like a creator (that is start), not for adding captions, zooms or cards (edit), and not for analysing someone else's videos (teardown).
 license: MIT
 compatibility: macOS, ffmpeg, whisper.cpp with Whisper large-v3-turbo and the engine venv (the setup skill installs them). Runs from the full motionmaxxing plugin folder (uses its lib/). German and English takes.
 ---
@@ -56,7 +56,7 @@ Before anything else, ask one question in the question box (start decides this f
 Skip it only when the user already answered ("just cut it", "cut and style it in one go") or start or
 clips called this skill. **Just the cut first:** steps 1-6, then stop until the user approves the cut
 **and** asks for the style. **Everything at once:** steps 1-5, open the cut page, go straight on to
-style-edit; a later cut change re-runs style-edit from its plan step.
+edit; a later cut change re-runs edit from its plan step.
 
 ## 0b. Read the user's taste
 
@@ -154,15 +154,12 @@ go first, the judge after: `references/judge.md`. Never read `paper-edit.md` you
 Foreground (render.py waits for the background encode):
 
 ```bash
-R="${CLAUDE_PLUGIN_ROOT}/lib/mm/review.py"
 python3 "$S/build_timeline.py" <source> edits/<name> && \
 python3 "$S/render.py" <source> edits/<name> && \
-python3 "$PY" "$S/verify_cut.py" edits/<name> --engine <same engine as step 1> && \
-python3 "$S/preview_cut.py" edits/<name> --no-open && \
-python3 "$R" edits/<name> start --video edits/<name>/cut.mp4 --stage cut --transcript edits/<name>/words.json
+python3 "$PY" "$S/verify_cut.py" edits/<name> --engine <same engine as step 1>
 ```
 
-Verify clean: the cut page is ready. Verify diffs the cut's transcript with the kept words (exit 1 stops the chain):
+Verify clean: the cut is ready, and the studio's page for the video shows it by itself. Verify diffs the cut's transcript with the kept words (exit 1 stops the chain):
 - **MISSING**: a kept word is not in the render. Raise `--pad` (or narrow the span), rebuild, re-render.
 - **SURVIVED**: a span to add for a real repeat or stumble, never one that cuts a kept line.
 - **HEARD DIFFERENTLY** ("lumo -> jeff") and filler notes are transcriber variance: no rebuild.
@@ -173,17 +170,21 @@ One fix cycle (the same chain), then show the user what is left.
 
 ## 6. The user approves
 
-The chain opened the review page (`../style-edit/references/review.md`). `serve` and `wait` in the
-background. Say the seconds cut. Notes: "keep <line>": narrow or delete that span; "cut <line>": add one; pauses
-off: `--max-pause`. Then steps 4-5, `resolve` each note (`--reply`: what changed), last
-`round --video edits/<name>/cut.mp4` (never a second `start`), then ask any learn question.
+In the studio, the video's page (`http://localhost:5199/videos/<name>`) shows the cut, the raw take, the transcript with
+every cut word struck through, and a notes panel. Never open a browser or a review page yourself. End your turn with the
+seconds before and after, what went, and anything worth a look. Outside the studio, give the path of `cut.mp4` and say
+`mm` opens the studio.
 
-After approval, one Bash call: `python3 "$S/trend.py" log edits/<name>` (`tally`: trend), the hook check. Then hook variants if `hooks.json` exists (`references/retake-detection.md`); called by start, ask that in the same question box as style-edit's stills approval, not before it.
+- The user's own transcript edits (select words, Cut or Bring back) are applied by the studio itself (`edits.py`, then
+  build and render). Their result is in `spans.json` (kind `manual`): never undo a `manual` span.
+- Notes arrive as one message, each at a time on the cut ("12.4 s: keep the second hook"). Map the time to the raw
+  take through `decisions.json`, fix each (a span narrowed, deleted or added; pauses: `--max-pause`), run steps 4-5
+  once for all of them, then answer each note in one line, in order, starting with its time.
+- "The user approved the cut." arrives as a status line. Then one Bash call: `python3 "$S/trend.py" log edits/<name>`
+  (`tally`: trend), and the hook check. Then hook variants if `hooks.json` exists (`references/retake-detection.md`).
 
-Only approval finishes the cut; `cut.mp4`, `words.json` go to style-edit. On "just the
-cut first", say they can ask for the style. Never start style-edit on your own. Called by start: as
-the page opens, start `visual-prep` in the background; its `motion_briefs`: a background
-`clip-builder` each at once; say a `motion_note` once.
+Only approval finishes the cut; `cut.mp4` and `words.json` go on to the edit. On "just the cut first", say they can
+ask for the edit. Never start the edit on your own.
 
 ## If a script stops
 

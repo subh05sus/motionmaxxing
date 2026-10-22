@@ -1,0 +1,509 @@
+/* From the apple-glass design kit (the Liquid Glass layer). */
+/* ------------------------------------------------------------------ */
+/*  Liquid Glass. See components/ui/glass.tsx for the layer order,     */
+/*  the refraction filter and the rules for where glass may go.        */
+/*                                                                     */
+/*  In the `components` layer on purpose: Tailwind utilities must win  */
+/*  over the material (an `absolute` or `bg-*` on a glass element has  */
+/*  to take effect), which unlayered CSS would silently prevent.       */
+/* ------------------------------------------------------------------ */
+
+@layer components {
+  /*
+   * The material: Apple's "regular" Liquid Glass. What is behind is blurred,
+   * lifted in saturation and shifted in luminosity -- lighter in light mode,
+   * darker in dark mode -- under a translucent fill, so whatever scrolls
+   * underneath turns into soft colour and the labels on top stay legible.
+   * Light falls on the pane from above: a specular hairline brightest along
+   * the top edge that fades down the sides (never a uniform ring), a faint
+   * glow pooled under it, and a soft, deep shadow lifting it off the page.
+   * On Chromium the lens (glass.tsx) bends the rim on top of all this.
+   *
+   * Everything a variant or a mode changes is a custom property:
+   *   --glass-tint          the fill (named so callers can override it)
+   *   --glass-blur, --glass-saturate, --glass-luma
+   *                         the frosted backdrop when there is no lens
+   *   --glass-lens-blur     frost added after the lens bend (glass.tsx)
+   *   --glass-edge-top/-side/-low/-bottom
+   *                         the specular hairline, top to bottom
+   *   --glass-glow          the light pooled under the top edge
+   *   --glass-shadow        the lift
+   *   --glass-veil          laid over the fill in Soft, for a steadier pane
+   *   --glass-solid, --glass-solid-edge
+   *                         the opaque surface and hairline it becomes in
+   *                         Solid, with Reduce Transparency and without
+   *                         backdrop-filter (the .surface-menu look)
+   *
+   * The glass slider's thumb (`.liquid-bead`) is left out of every rule
+   * here: it keeps a frozen copy of the previous recipe further down.
+   */
+  .liquid-glass {
+    --glass-tint: rgb(255 255 255 / 0.42);
+    --glass-blur: 12px;
+    --glass-saturate: 180%;
+    --glass-luma: 1.05;
+    --glass-lens-blur: 3px;
+    --glass-edge-top: rgb(255 255 255 / 0.9);
+    --glass-edge-side: rgb(255 255 255 / 0.3);
+    --glass-edge-low: rgb(0 0 0 / 0.035);
+    --glass-edge-bottom: rgb(0 0 0 / 0.07);
+    --glass-glow: rgb(255 255 255 / 0.5);
+    --glass-shadow:
+      0 8px 24px -10px rgb(0 0 0 / 0.2), 0 1px 3px 0 rgb(0 0 0 / 0.06);
+    --glass-veil: rgb(255 255 255 / 0.22);
+    --glass-solid: var(--popover);
+    --glass-solid-edge: color-mix(in srgb, var(--foreground) 8%, transparent);
+  }
+
+  .dark .liquid-glass {
+    --glass-tint: rgb(36 36 42 / 0.46);
+    --glass-blur: 14px;
+    --glass-saturate: 150%;
+    --glass-luma: 0.85;
+    --glass-edge-top: rgb(255 255 255 / 0.3);
+    --glass-edge-side: rgb(255 255 255 / 0.06);
+    --glass-edge-low: rgb(255 255 255 / 0.025);
+    --glass-edge-bottom: rgb(255 255 255 / 0.09);
+    --glass-glow: rgb(255 255 255 / 0.08);
+    --glass-shadow:
+      0 12px 30px -10px rgb(0 0 0 / 0.65), 0 2px 6px -1px rgb(0 0 0 / 0.4);
+    --glass-veil: rgb(24 24 27 / 0.32);
+    --glass-solid-edge: color-mix(in srgb, var(--foreground) 10%, transparent);
+  }
+
+  .liquid-glass:not(.liquid-bead) {
+    position: relative;
+    isolation: isolate;
+    background: var(--glass-tint);
+    /* The frosted path (Safari, Firefox, and panes without the lens); the
+       refracting path replaces this inline (glass.tsx). */
+    -webkit-backdrop-filter: blur(
+        calc(var(--glass-blur) + var(--glass-blur-extra, 0px))
+      )
+      saturate(var(--glass-saturate)) brightness(var(--glass-luma));
+    backdrop-filter: blur(
+        calc(var(--glass-blur) + var(--glass-blur-extra, 0px))
+      )
+      saturate(var(--glass-saturate)) brightness(var(--glass-luma));
+    box-shadow: var(--glass-shadow);
+  }
+
+  /* Glow: light pooled just under the top edge -- the pane's thickness. */
+  .liquid-glass:not(.liquid-bead)::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(
+      180deg,
+      var(--glass-glow),
+      transparent min(60%, 1.25rem)
+    );
+  }
+
+  /* Edge: a 1px specular hairline lit from above, as a masked gradient ring
+     so it follows any corner radius. Brightest along the top, fading down
+     the sides, with a faint catch-light where the light leaves the bottom.
+     Stops in rem, not only %, so a tall pane (a four-line composer) keeps
+     its highlight at the top instead of stretching it down the sides. */
+  .liquid-glass:not(.liquid-bead)::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    padding: 1px;
+    pointer-events: none;
+    background: linear-gradient(
+      180deg,
+      var(--glass-edge-top) 0,
+      var(--glass-edge-side) min(45%, 1.25rem),
+      var(--glass-edge-low) calc(100% - min(30%, 1rem)),
+      var(--glass-edge-bottom) 100%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+  }
+
+  /* Clear: over rich media only (the HIG's rule) -- the tutor's video and
+     the image viewers. Barely frosted and never darkened, so the picture
+     stays vivid; pair with `.liquid-dim` where the media is bright. */
+  .liquid-glass.liquid-glass-clear {
+    --glass-tint: rgb(255 255 255 / 0.3);
+    --glass-blur: 3px;
+    --glass-saturate: 160%;
+    --glass-luma: 1;
+    --glass-edge-top: rgb(255 255 255 / 0.7);
+    --glass-edge-side: rgb(255 255 255 / 0.2);
+    --glass-edge-low: rgb(255 255 255 / 0.06);
+    --glass-edge-bottom: rgb(255 255 255 / 0.22);
+    --glass-glow: rgb(255 255 255 / 0.3);
+    --glass-shadow:
+      0 8px 22px -10px rgb(0 0 0 / 0.35), 0 1px 3px 0 rgb(0 0 0 / 0.1);
+    --glass-veil: rgb(0 0 0 / 0.18);
+    --glass-solid: rgb(0 0 0 / 0.7);
+    --glass-solid-edge: rgb(255 255 255 / 0.14);
+  }
+  .dark .liquid-glass.liquid-glass-clear {
+    --glass-tint: rgb(255 255 255 / 0.15);
+    --glass-edge-top: rgb(255 255 255 / 0.42);
+    --glass-edge-side: rgb(255 255 255 / 0.1);
+    --glass-edge-low: rgb(255 255 255 / 0.04);
+    --glass-edge-bottom: rgb(255 255 255 / 0.14);
+    --glass-glow: rgb(255 255 255 / 0.12);
+    --glass-shadow:
+      0 10px 26px -10px rgb(0 0 0 / 0.6), 0 2px 6px -1px rgb(0 0 0 / 0.35);
+  }
+
+  /* Milky: a steadier, denser pane for navigation and for bars that hold
+     text -- the tab bar, floating action bars, the composer while a reply
+     is written. */
+  .liquid-glass.liquid-glass-milky {
+    --glass-tint: rgb(255 255 255 / 0.62);
+  }
+  .dark .liquid-glass.liquid-glass-milky {
+    --glass-tint: rgb(40 40 46 / 0.62);
+  }
+
+  /* Dense: the heaviest pane, for fields that hold typed text (the
+     dashboard Ask bar) and the landing navbar. More fill and more frost, so
+     what is behind reads as soft colour rather than detail. Its lens (the
+     navbar) frosts inside the filter (`blur` prop), so nothing is added
+     after the bend. */
+  .liquid-glass.liquid-glass-dense {
+    --glass-tint: rgb(255 255 255 / 0.74);
+    --glass-blur: 20px;
+    --glass-saturate: 170%;
+    --glass-luma: 1.04;
+    --glass-lens-blur: 0px;
+  }
+  .dark .liquid-glass.liquid-glass-dense {
+    --glass-tint: rgb(36 36 42 / 0.74);
+    --glass-saturate: 140%;
+    --glass-luma: 0.85;
+  }
+
+  /* Dense glass over a dark backdrop (the landing navbar over its dark
+     sections): the dark recipe, independent of the app's .dark theme. */
+  .liquid-glass.liquid-glass-dense.liquid-on-dark {
+    --glass-tint: rgb(22 22 26 / 0.58);
+    --glass-saturate: 150%;
+    --glass-luma: 0.9;
+    --glass-edge-top: rgb(255 255 255 / 0.26);
+    --glass-edge-side: rgb(255 255 255 / 0.07);
+    --glass-edge-low: rgb(255 255 255 / 0.03);
+    --glass-edge-bottom: rgb(255 255 255 / 0.1);
+    --glass-glow: rgb(255 255 255 / 0.07);
+    --glass-shadow:
+      0 12px 30px -10px rgb(0 0 0 / 0.5), 0 2px 6px -1px rgb(0 0 0 / 0.3);
+    --glass-veil: rgb(22 22 26 / 0.3);
+    --glass-solid: rgb(24 24 27);
+    --glass-solid-edge: rgb(255 255 255 / 0.1);
+  }
+
+  /* The one coloured glass: end call. Colour carries meaning here. */
+  .liquid-glass.liquid-glass-destructive {
+    --glass-tint: rgb(220 38 38 / 0.85);
+    --glass-saturate: 150%;
+    --glass-luma: 1;
+    --glass-edge-top: rgb(255 255 255 / 0.45);
+    --glass-edge-side: rgb(255 255 255 / 0.12);
+    --glass-edge-low: rgb(255 255 255 / 0.04);
+    --glass-edge-bottom: rgb(255 255 255 / 0.15);
+    --glass-glow: rgb(255 210 210 / 0.28);
+    --glass-veil: transparent;
+    --glass-solid: rgb(220 38 38);
+    --glass-solid-edge: transparent;
+  }
+  .dark .liquid-glass.liquid-glass-destructive {
+    --glass-tint: rgb(220 38 38 / 0.8);
+    --glass-edge-top: rgb(255 255 255 / 0.32);
+    --glass-glow: rgb(255 210 210 / 0.16);
+  }
+
+  /* The active-tab lens: a smaller, denser pane inside the bar. */
+  .liquid-lens {
+    background: rgb(255 255 255 / 0.35);
+    box-shadow:
+      inset 0 0 4px 0 rgb(255 255 255 / 0.6),
+      inset 1px 1px 1px -0.5px rgb(255 255 255 / 0.9),
+      0 2px 8px -2px rgb(0 0 0 / 0.15);
+  }
+  .dark .liquid-lens {
+    background: rgb(255 255 255 / 0.14);
+    box-shadow:
+      inset 0 0 4px 0 rgb(255 255 255 / 0.12),
+      inset 1px 1px 1px -0.5px rgb(255 255 255 / 0.3),
+      0 2px 8px -2px rgb(0 0 0 / 0.4);
+  }
+
+  /* Apple's 35% dim under clear glass when the media behind is bright. */
+  .liquid-dim {
+    background: linear-gradient(to top, rgb(0 0 0 / 0.35), transparent);
+  }
+  .liquid-dim-top {
+    background: linear-gradient(to bottom, rgb(0 0 0 / 0.35), transparent);
+  }
+
+  /* Menus, popovers, selects, dialogs, drawers: SOLID, not glass. Glass on
+     these read oddly -- they hold text and sit over busy content -- so they
+     keep the Apple shape (rounded corners, roomy rows, round close disc,
+     the inset More sheet) on an opaque surface with a hairline and a soft
+     lift. Overrides the shadcn `bg-*` / `border` / `shadow` utilities on
+     purpose, so every primitive gets one consistent surface. */
+  .surface-menu,
+  .surface-sheet {
+    background: var(--popover) !important;
+    border: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent) !important;
+    box-shadow:
+      0 16px 40px -14px rgb(0 0 0 / 0.22),
+      0 2px 6px -2px rgb(0 0 0 / 0.06) !important;
+  }
+  .surface-sheet {
+    background: var(--background) !important;
+  }
+  /* Media viewers: the solid dialog surface, but a black stage for the
+     picture, with the controls as clear glass over it. */
+  .surface-sheet.surface-media {
+    background: #000 !important;
+    border: 0 !important;
+  }
+  .dark .surface-menu,
+  .dark .surface-sheet {
+    border-color: color-mix(in srgb, var(--foreground) 10%, transparent) !important;
+    box-shadow:
+      0 20px 48px -14px rgb(0 0 0 / 0.6),
+      0 2px 6px -2px rgb(0 0 0 / 0.3) !important;
+  }
+
+  /* Scroll-edge effect: content fades as it slides under a floating glass
+     bar, so the bar can stay clear without its labels losing out. */
+  .scroll-edge-top {
+    background: linear-gradient(
+      to bottom,
+      var(--background) 0%,
+      color-mix(in srgb, var(--background) 65%, transparent) 50%,
+      transparent 100%
+    );
+  }
+  .scroll-edge-bottom {
+    background: linear-gradient(
+      to top,
+      var(--background) 0%,
+      color-mix(in srgb, var(--background) 65%, transparent) 45%,
+      transparent 100%
+    );
+  }
+
+  /* The bar material: full-width chrome (the desktop header, the status-bar
+     scrim) -- the page colour at 80% over a blur. Follows the surface style
+     like the glass does (opaque in Solid, below). */
+  .material-bar {
+    background-color: color-mix(in srgb, var(--background) 80%, transparent);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    backdrop-filter: blur(16px) saturate(180%);
+  }
+
+  /* ---- Surface style (Settings > Appearance; data-glass on <html>) ---- */
+
+  /* Soft: frosted glass without the lens (glass.tsx skips the bend) -- a
+     veil over the fill and more frost, a steadier pane that costs less.
+     Also what Reduce Transparency (the OS setting) gets until a surface
+     style is picked: frostier, more opaque glass, as on Apple platforms.
+     Not Solid: Windows reports its "Transparency effects" switch as this
+     signal, and plenty of people turn that off without asking for an
+     opaque app. An explicit choice (data-glass on <html>, set by
+     lib/glass-preference.ts) wins over it either way. */
+  :root[data-glass="frosted"] .liquid-glass:not(.liquid-bead) {
+    --glass-blur-extra: 10px;
+    background:
+      linear-gradient(var(--glass-veil), var(--glass-veil)), var(--glass-tint);
+  }
+  /* biome-ignore lint/correctness/noUnknownMediaFeatureName: Media Queries Level 5, Chrome 118+ */
+  @media (prefers-reduced-transparency: reduce) {
+    :root:not([data-glass]) .liquid-glass:not(.liquid-bead) {
+      --glass-blur-extra: 10px;
+      background:
+        linear-gradient(var(--glass-veil), var(--glass-veil)), var(--glass-tint);
+    }
+  }
+
+  /* Solid: the opaque standard material (the .surface-menu look) wherever
+     glass would be -- no blur, no glow, no specular edge, no bend; a neutral
+     hairline keeps the shape. !important beats the inline refraction style.
+
+     One-off blurred surfaces follow it too (sticky bars, canvas toolbars,
+     chips): the blur goes, and a translucent app surface -- the background,
+     card or popover colour at 70% or more -- turns opaque. Lighter veils
+     over media keep their see-through. */
+  :root[data-glass="off"] .liquid-glass:not(.liquid-bead) {
+    background: var(--glass-solid) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+  :root[data-glass="off"] .liquid-glass:not(.liquid-bead)::before {
+    display: none;
+  }
+  :root[data-glass="off"] .liquid-glass:not(.liquid-bead)::after {
+    background: var(--glass-solid-edge);
+  }
+  :root[data-glass="off"] .material-bar,
+  :root[data-glass="off"] [class*="backdrop-blur"] {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+  :root[data-glass="off"] .material-bar,
+  :root[data-glass="off"]
+    [class*="backdrop-blur"]:is(
+      [class*="bg-background/7"],
+      [class*="bg-background/8"],
+      [class*="bg-background/9"]
+    ) {
+    background-color: var(--background) !important;
+  }
+  :root[data-glass="off"]
+    [class*="backdrop-blur"]:is(
+      [class*="bg-card/7"],
+      [class*="bg-card/8"],
+      [class*="bg-card/9"]
+    ) {
+    background-color: var(--card) !important;
+  }
+
+  /* No backdrop-filter at all (old engines): a translucent fill with
+     nothing blurred behind it only looks broken, so go solid. */
+  @supports not (
+      (backdrop-filter: blur(1px)) or
+      (-webkit-backdrop-filter: blur(1px))
+    ) {
+    .liquid-glass:not(.liquid-bead) {
+      background: var(--glass-solid);
+    }
+    .liquid-glass:not(.liquid-bead)::before {
+      display: none;
+    }
+    .liquid-glass:not(.liquid-bead)::after {
+      background: var(--glass-solid-edge);
+    }
+    .material-bar {
+      background-color: var(--background);
+    }
+  }
+
+  /* ---- Frozen: the glass slider's thumb (glass-slider.tsx) ------------
+     The owner signed its look off as final, so `.liquid-bead` keeps a
+     verbatim copy of the previous recipe (clear variant) and none of the
+     rules above touch it. Do not retune. */
+  .liquid-glass.liquid-bead {
+    --bead-tint: rgb(255 255 255 / 0.3);
+    --bead-edge-glow: rgb(255 255 255 / 0.4);
+    --bead-rim-hi: rgb(255 255 255 / 0.95);
+    --bead-rim-lo: rgb(255 255 255 / 0.18);
+    --bead-glint: rgb(255 255 255 / 0.4);
+    --bead-shadow: rgb(0 0 0 / 0.22);
+    position: relative;
+    isolation: isolate;
+    background: var(--bead-tint);
+    -webkit-backdrop-filter: blur(3px) saturate(160%);
+    backdrop-filter: blur(3px) saturate(160%);
+    box-shadow:
+      0 10px 30px -10px var(--bead-shadow),
+      0 1px 3px 0 rgb(0 0 0 / 0.08),
+      inset 0 0 6px 0 var(--bead-edge-glow),
+      inset 1.5px 1.5px 1px -1px var(--bead-rim-hi),
+      inset -1px -1px 1px -0.5px rgb(255 255 255 / 0.45);
+  }
+  .dark .liquid-glass.liquid-bead {
+    --bead-tint: rgb(255 255 255 / 0.15);
+    --bead-rim-hi: rgb(255 255 255 / 0.55);
+    --bead-rim-lo: rgb(255 255 255 / 0.06);
+    --bead-shadow: rgb(0 0 0 / 0.6);
+  }
+  .liquid-glass.liquid-bead::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    background: radial-gradient(
+      120% 70% at 30% -10%,
+      var(--bead-glint) 0%,
+      transparent 55%
+    );
+    mix-blend-mode: screen;
+  }
+  .liquid-glass.liquid-bead::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    padding: 1px;
+    pointer-events: none;
+    background: linear-gradient(
+      135deg,
+      var(--bead-rim-hi) 0%,
+      var(--bead-rim-lo) 30%,
+      transparent 50%,
+      var(--bead-rim-lo) 70%,
+      var(--bead-rim-hi) 100%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+  }
+  /* Solid: a white knob -- a bead has no label to protect, so a dark dim
+     would only read as a black blob. */
+  :root[data-glass="off"] .liquid-glass.liquid-bead {
+    background: rgb(255 255 255 / 0.97) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    box-shadow:
+      0 2px 10px rgb(0 0 0 / 0.28),
+      inset 0 0 0 1px rgb(0 0 0 / 0.06);
+  }
+  :root[data-glass="off"] .liquid-glass.liquid-bead::before {
+    display: none;
+  }
+
+  /* Increase Contrast still follows the OS: it is an accessibility need,
+     not a look, and it does not fire from the Windows transparency toggle. */
+  @media (prefers-contrast: more) {
+    .liquid-glass {
+      background: var(--background) !important;
+      -webkit-backdrop-filter: none !important;
+      backdrop-filter: none !important;
+      outline: 1px solid var(--foreground);
+    }
+    .liquid-glass.liquid-glass-clear {
+      background: rgb(0 0 0 / 0.85) !important;
+      outline-color: white;
+    }
+    .liquid-glass.liquid-glass-destructive {
+      background: rgb(185 28 28) !important;
+    }
+    .liquid-glass::before,
+    .liquid-glass::after {
+      display: none;
+    }
+    .liquid-lens {
+      background: transparent !important;
+      box-shadow: none !important;
+      outline: 2px solid var(--foreground);
+      outline-offset: -2px;
+    }
+    .material-bar {
+      background-color: var(--background);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+}

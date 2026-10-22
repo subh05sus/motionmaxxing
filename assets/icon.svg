@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3AA5FF"/>
+      <stop offset="1" stop-color="#0058D6"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.28"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="drop" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#001a4d" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <!-- macOS icon grid: an 824 px body, 100 px margin, continuous-corner radius 185 -->
+  <g filter="url(#drop)">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  </g>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sheen)"/>
+  <!-- speed lines: motion -->
+  <g stroke="#FFFFFF" stroke-linecap="round" stroke-width="44" opacity="0.92">
+    <line x1="268" y1="404" x2="408" y2="404" opacity="0.55"/>
+    <line x1="228" y1="512" x2="408" y2="512" opacity="0.8"/>
+    <line x1="268" y1="620" x2="408" y2="620" opacity="0.55"/>
+  </g>
+  <!-- play -->
+  <polygon points="498,338 782,512 498,686" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="64" stroke-linejoin="round"/>
+</svg>

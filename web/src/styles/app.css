@@ -1,0 +1,143 @@
+@import "tailwindcss";
+@import "./apple-tokens.css";
+@import "./liquid-glass.css";
+@import "./focus-ring.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * motionmaxxing's tokens, on Apple's (apple-tokens.css). The desktop is macOS: graphite in dark mode (content #1E1E1E,
+ * the sidebar and toolbar a step lighter, labels at 85% white), never pure black. Phones are iOS: a black base with
+ * #1C1C1E groups. One accent, Apple blue, only where it means something (the primary action, selection, the playhead).
+ * Glass (liquid-glass.css) lives on floating controls only: the player's controls, the chat composer, floating bars.
+ */
+:root {
+  --background: var(--mac-content);
+  --window: var(--mac-window);
+  --sidebar: #f6f6f6;
+  --toolbar: #f2f2f2;
+  --foreground: var(--mac-label);
+  --muted-foreground: var(--mac-label-2);
+  --faint-foreground: var(--mac-label-3);
+  --card: #ffffff;
+  --card-2: #f5f5f7;
+  --popover: var(--apple-elevated-bg);
+  --popover-foreground: var(--apple-label);
+  --primary: var(--apple-blue);
+  --primary-foreground: #ffffff;
+  --secondary: var(--apple-fill-3);
+  --secondary-foreground: var(--mac-label);
+  --accent: var(--apple-fill-4);
+  --accent-foreground: var(--mac-label);
+  --muted: var(--apple-fill-4);
+  --destructive: var(--apple-red);
+  --success: var(--apple-green);
+  --warning: var(--apple-orange);
+  --border: var(--mac-separator);
+  --input: var(--apple-fill-3);
+  --ring: var(--apple-blue);
+  --selection: var(--mac-selection);
+  --cut-word: rgb(255 59 48 / 0.85);
+  --radius: 10px;
+  color-scheme: light;
+}
+
+.dark {
+  --background: #1e1e1e;
+  --window: #323232;
+  --sidebar: #262626;
+  --toolbar: #2a2a2a;
+  --card: #262626;
+  --card-2: #2c2c2e;
+  --popover: #2c2c2e;
+  --popover-foreground: var(--mac-label);
+  --input: rgb(255 255 255 / 0.08);
+  --cut-word: rgb(255 105 97 / 0.9);
+  color-scheme: dark;
+}
+
+/* Phones are iOS: pure black base, #1C1C1E groups, the same labels. */
+@media (max-width: 767px) {
+  .dark {
+    --background: #000000;
+    --sidebar: #000000;
+    --toolbar: #000000;
+    --card: #1c1c1e;
+    --card-2: #2c2c2e;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-window: var(--window);
+  --color-sidebar: var(--sidebar);
+  --color-toolbar: var(--toolbar);
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-faint-foreground: var(--faint-foreground);
+  --color-card: var(--card);
+  --color-card-2: var(--card-2);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-muted: var(--muted);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-cut: var(--cut-word);
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    /* macOS exact: 13 px body text on the desktop */
+    font-size: 13px;
+    line-height: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow: hidden;
+  }
+  @media (max-width: 767px) { body { font-size: 15px; line-height: 20px; overflow: auto; } }
+  * { border-color: var(--border); }
+  ::selection { background: color-mix(in srgb, var(--primary) 35%, transparent); }
+  button { cursor: default; }
+  input, textarea { font: inherit; }
+  :focus:not(:focus-visible) { outline: none; }
+}
+
+/* Thin, quiet scrollbars like a Mac with "show scroll bars: when scrolling". */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--foreground) 22%, transparent) transparent; }
+
+@layer components {
+  /* A row in a list or the sidebar: macOS exact, 28 px tall. */
+  .row { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 8px; border-radius: 6px; }
+  .row-hover:hover { background: var(--accent); }
+  .row[aria-current="page"], .row[aria-selected="true"] { background: color-mix(in srgb, var(--foreground) 10%, transparent); }
+  .hairline { border-color: var(--border); }
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
+  .caption { font-size: 11px; line-height: 14px; color: var(--muted-foreground); }
+  .label-2 { color: var(--muted-foreground); }
+  .label-3 { color: var(--faint-foreground); }
+  .title-1 { font-size: 22px; line-height: 26px; font-weight: 700; letter-spacing: -0.01em; }
+  .title-2 { font-size: 17px; line-height: 22px; font-weight: 600; }
+  .headline { font-size: 13px; line-height: 16px; font-weight: 600; }
+  .kbd { font-size: 11px; color: var(--faint-foreground); font-family: var(--font-sans); }
+  .tabular { font-variant-numeric: tabular-nums; }
+}

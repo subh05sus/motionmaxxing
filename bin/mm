@@ -1,0 +1,61 @@
+#!/bin/bash
+# motionmaxxing: open the studio (starting it when it is not running), or stop it.
+#
+#   mm            start the studio if needed and open it in the browser
+#   mm stop       stop the studio
+#   mm status     say whether it runs
+#   mm app        put motionmaxxing.app in ~/Applications (for the Dock)
+#   mm logs       the studio's log
+set -euo pipefail
+
+SELF="$0"
+while [ -L "$SELF" ]; do
+  L="$(readlink "$SELF")"; case "$L" in /*) SELF="$L" ;; *) SELF="$(dirname "$SELF")/$L" ;; esac
+done
+ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+PORT="${MM_PORT:-5199}"
+HOME_DIR="${MM_HOME:-$HOME/.motionmaxxing}"
+LOG="$HOME_DIR/studio/studio.log"
+PIDF="$HOME_DIR/studio/studio.pid"
+URL="http://localhost:$PORT"
+mkdir -p "$HOME_DIR/studio"
+# Finder and the Dock start apps with a bare PATH: Homebrew's node, ffmpeg and whisper-cli must be found.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+running() { curl -s -o /dev/null --max-time 1 "$URL/api/state"; }
+
+start() {
+  if running; then return 0; fi
+  if [ ! -d "$ROOT/node_modules" ]; then (cd "$ROOT" && npm install --silent); fi
+  if [ ! -f "$ROOT/web/dist/index.html" ] || [ -n "$(find "$ROOT/web/src" -newer "$ROOT/web/dist/index.html" -type f -print -quit)" ]; then
+    (cd "$ROOT" && npm run build --silent >>"$LOG" 2>&1)
+  fi
+  (cd "$ROOT" && nohup "$ROOT/node_modules/.bin/tsx" src/server/main.ts >>"$LOG" 2>&1 & echo $! >"$PIDF")
+  for _ in $(seq 1 40); do running && return 0; sleep 0.25; done
+  echo "The studio did not start. Its log: $LOG" >&2
+  tail -20 "$LOG" >&2
+  exit 1
+}
+
+case "${1:-open}" in
+  open|"")
+    start
+    open "$URL"
+    ;;
+  stop)
+    if [ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null; then rm -f "$PIDF"; echo "stopped"; else pkill -f "src/server/main.ts" && echo "stopped" || echo "not running"; fi
+    ;;
+  status)
+    if running; then echo "running at $URL"; else echo "not running"; fi
+    ;;
+  logs)
+    tail -50 "$LOG"
+    ;;
+  app)
+    bash "$ROOT/scripts/make-app.sh"
+    ;;
+  *)
+    sed -n 2,9p "$0" | sed 's/^# \{0,1\}//'
+    exit 2
+    ;;
+esac

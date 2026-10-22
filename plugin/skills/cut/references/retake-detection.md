@@ -73,7 +73,7 @@ After the main cut is approved, ask once in the question box:
 
 On "one version per hook", for each n in `hooks.json`: `python3 "$S/retakes.py" hook edits/<name> <n>`
 prints `edits/<name>-hook<n>`; run cut steps 3-5 on it (build prints `lead ... plays first`; the
-paper-edit lists words in recording order, so the hook reads last there), then style-edit on it with
+paper-edit lists words in recording order, so the hook reads last there), then edit on it with
 the same choices as the main edit.
 
 The variants share nothing, so build, render and verify them all at once, one shell job each, in one
