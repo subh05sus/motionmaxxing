@@ -1,0 +1,253 @@
+"""Language packs: every word list the editor reads speech with, per language. Stdlib only.
+
+    from mm import lang
+    P = lang.pack(lang.of(edit_dir))      # the edit's language (meta.json), MM_LANG, else "en"
+    P.hard_fillers  P.soft_fillers  P.stop  P.meta  P.filler_prompt  P.common  P.hook_stop  P.hook_generic
+    lang.set_meta(edit_dir, lang="de")    # transcribe.py records what Whisper heard
+    python3 lang.py demo
+
+A pack never decides a cut. It names the places to look (retakes.py candidates), how to fold two transcripts of
+the same speech into the same tokens (textnorm), and what to prompt Whisper with so it keeps the hesitations the cut
+needs as evidence.
+
+German notes:
+  - Every German noun is capitalised, so "a capitalised word is a name" (the English keyterm rule) is wrong here:
+    keyterms() keeps words with digits, inner capitals (ChatGPT) or all caps (KI), plus words spelled in ways German
+    rarely spells (a "c" outside ch/ck/sch, a y, a q without u: Claude, Cursor).
+  - Number words are compounds ("fünfundzwanzig", "zweihundertfünfzig", "dreitausend"): fold_de() reads one word.
+  - "eh" is not a filler in German ("das ist eh klar"); "ja", "so" and "nochmal" are ordinary words, so they are only
+    candidates where they sit as a hesitation or restart.
+"""
+import json
+import os
+import re
+from pathlib import Path
+
+DEFAULT = "en"
+
+
+class Pack:
+    def __init__(self, code, **kw):
+        self.code = code
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+EN = Pack(
+    "en",
+    hard_fillers={"um", "uh", "umm", "uhh", "erm", "er", "hmm", "mm", "ah", "eh"},
+    soft_fillers=["you know", "i mean", "like"],
+    loose_soft={"like"},
+    like_before={"and", "so", "but", "or", "um", "uh", "was", "were"},
+    stop={"a", "an", "the", "and", "or", "but", "so", "of", "to", "in", "on", "at", "it", "is",
+          "i", "you", "we", "that", "this", "for", "with", "be", "was", "are", "my", "me", "if",
+          "it's", "it'll", "i'm", "they", "he", "she", "do", "not", "there", "then", "just"},
+    meta=re.compile(r"\b(wait|sorry|hold on|shoot|oops|start (?:again|over)|one more time|"
+                    r"let me (?:start|do (?:that|this|it)|try|say (?:that|it))(?: (?:again|over))?|"
+                    r"take two|again)\b"),
+    filler_prompt="Umm, uh, so, like, you know, I mean, uh, so, um, wait, sorry, let me start again.",
+    common=set("""a an and are as at be but by can do for from have he her his how i if in is it its just
+let me my no not now of on or our out so that the their then there these they this to up us was we
+what when where which who why will with you your yes okay ok hey hi here today first next last one two
+three four five six seven eight nine ten monday tuesday wednesday thursday friday saturday sunday""".split()),
+    hook_stop=set("""a an the and or but of to in on at for with without from by as is are was be been
+this that these those it its my your our their i you we they he she me us them how why what when where who
+which do does did done get gets got make makes made can will would should could just really very so not no
+all any some more most than then there here into about over out up down off""".split()),
+    hook_generic={"ai", "video", "tool", "thing", "guide", "tip"},
+    hook_verbs=set("become becomes stop stops start starts build builds use uses using learn learns".split()),
+    percent="percent",
+    spoken_same={"wanna": "want to", "gonna": "going to", "gotta": "got to", "kinda": "kind of",
+                 "sorta": "sort of", "til": "till", "cuz": "because", "yall": "you all"},
+    dangling={"and", "or", "but", "so", "the", "a", "an", "to", "of", "if", "with", "for", "that", "because", "like"},
+)
+
+DE = Pack(
+    "de",
+    hard_fillers={"äh", "ähm", "ähh", "ähmm", "äm", "öh", "öhm", "ehm", "hm", "hmm", "mhm", "mh", "mm", "em"},
+    soft_fillers=["weißt du", "weißte", "sozusagen", "quasi", "irgendwie", "halt", "also", "genau"],
+    loose_soft={"halt", "also", "genau", "quasi", "irgendwie", "sozusagen"},
+    like_before={"und", "aber", "oder", "so", "äh", "ähm"},
+    stop={"der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer", "und", "oder",
+          "aber", "so", "von", "zu", "zum", "zur", "in", "im", "an", "am", "auf", "für", "mit", "ist", "sind",
+          "war", "es", "ich", "du", "er", "sie", "wir", "ihr", "man", "nicht", "dann", "da", "dass", "wenn",
+          "wie", "was", "auch", "noch", "schon", "nur", "mal", "ja", "hier", "jetzt", "bei", "aus", "als",
+          "euch", "dir", "mir", "mich", "dich", "uns"},
+    meta=re.compile(r"\b(warte(?: mal)?|sorry|moment mal|stopp|(?:noch ?mal )?von vorne|"
+                    r"ich (?:fang|fange) (?:noch ?mal )?(?:neu|von vorne) an|neu anfangen|noch ?mal neu|"
+                    r"mist|scheiße|scheisse|verdammt|oh gott|nein nein|nee nee)\b"),
+    filler_prompt="Ähm, äh, also, ja, halt, ähm, sozusagen, äh, warte, sorry, nochmal von vorne.",
+    common=set("""der die das den dem des ein eine einen einem einer und oder aber so von zu zum zur in im an
+am auf für mit ist sind war es ich du er sie wir ihr man nicht dann da dass wenn wie was heute hier jetzt
+montag dienstag mittwoch donnerstag freitag samstag sonntag ja nein okay ok hallo hey""".split()),
+    hook_stop=set("""der die das den dem des ein eine einen einem einer und oder aber so von zu zum zur in im
+an am auf für mit ohne ist sind war waren wird werden es ich du er sie wir ihr man mein dein unser euer wie
+warum was wann wo wer welche welcher dies diese dieser das mehr am meisten als dann da hier nicht kein keine
+alle jede jeder jetzt heute""".split()),
+    hook_generic={"ki", "ai", "video", "tool", "tools", "ding", "tipp", "tipps", "guide"},
+    hook_verbs=set("werden wird machen macht bauen baut nutzen nutzt lernen lernt zeigen zeigt erklären "
+                   "erklärt starten startet".split()),
+    percent="prozent",
+    spoken_same={"nen": "einen", "ner": "einer", "nem": "einem", "gibt's": "gibt es", "gibts": "gibt es",
+                 "geht's": "geht es", "gehts": "geht es", "hab's": "habe es", "hab": "habe", "ham": "haben",
+                 "haste": "hast du", "biste": "bist du", "kannste": "kannst du", "willste": "willst du",
+                 "weißte": "weißt du", "isses": "ist es", "wie's": "wie es", "wär's": "wäre es"},
+    dangling={"und", "oder", "aber", "der", "die", "das", "ein", "eine", "zu", "von", "mit", "für", "dass",
+              "weil", "wenn", "also"},
+)
+
+PACKS = {"en": EN, "de": DE}
+
+
+def pack(code=None):
+    """The pack for a language code ("de", "de-DE", "german"); unknown languages get English's lists."""
+    c = (code or DEFAULT).lower().replace("_", "-").split("-")[0]
+    c = {"german": "de", "deutsch": "de", "english": "en"}.get(c, c)
+    return PACKS.get(c, EN)
+
+
+def meta_path(edit_dir):
+    return Path(edit_dir) / "meta.json"
+
+
+def get_meta(edit_dir):
+    try:
+        return json.loads(meta_path(edit_dir).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def set_meta(edit_dir, **kw):
+    """Merge keys into <edit>/meta.json (the edit's language, the engine that heard it)."""
+    m = get_meta(edit_dir)
+    m.update({k: v for k, v in kw.items() if v is not None})
+    p = meta_path(edit_dir)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(m, indent=1, ensure_ascii=False), encoding="utf-8")
+    return m
+
+
+def of(edit_dir=None):
+    """The language to read an edit with: MM_LANG, else meta.json's "lang", else DEFAULT."""
+    env = os.environ.get("MM_LANG", "").strip()
+    if env:
+        return pack(env).code
+    if edit_dir is not None:
+        got = get_meta(edit_dir).get("lang")
+        if got:
+            return pack(got).code
+    return DEFAULT
+
+
+# --- German numbers -------------------------------------------------------------
+
+DE_UNITS = {"null": 0, "ein": 1, "eins": 1, "eine": 1, "zwei": 2, "drei": 3, "vier": 4, "fünf": 5, "sechs": 6,
+            "sieben": 7, "acht": 8, "neun": 9}
+DE_TEENS = {"zehn": 10, "elf": 11, "zwölf": 12, "dreizehn": 13, "vierzehn": 14, "fünfzehn": 15, "sechzehn": 16,
+            "siebzehn": 17, "achtzehn": 18, "neunzehn": 19}
+DE_TENS = {"zwanzig": 20, "dreißig": 30, "dreissig": 30, "vierzig": 40, "fünfzig": 50, "sechzig": 60,
+           "siebzig": 70, "achtzig": 80, "neunzig": 90}
+DE_SCALES = {"million": 10**6, "millionen": 10**6, "mio": 10**6, "milliarde": 10**9, "milliarden": 10**9,
+             "mrd": 10**9, "billion": 10**12, "billionen": 10**12}
+
+
+def _de_lt100(w):
+    if w in DE_UNITS:
+        return DE_UNITS[w]
+    if w in DE_TEENS:
+        return DE_TEENS[w]
+    if w in DE_TENS:
+        return DE_TENS[w]
+    if "und" in w:
+        u, _, t = w.partition("und")
+        if u in DE_UNITS and DE_UNITS[u] > 0 and t in DE_TENS:
+            return DE_UNITS[u] + DE_TENS[t]
+    return None
+
+
+def _de_lt1000(w):
+    if "hundert" in w:
+        left, _, right = w.partition("hundert")
+        lv = 1 if left in ("", "ein") else DE_UNITS.get(left)
+        rv = 0 if right == "" else _de_lt100(right.removeprefix("und"))
+        if lv is None or rv is None:
+            return None
+        return lv * 100 + rv
+    return _de_lt100(w)
+
+
+def fold_de(w):
+    """One German number word (a compound) as an int, else None: "fünfundzwanzig" 25, "zweihundertfünfzig" 250,
+    "dreitausendvierhundert" 3400, "hundert" 100, "tausend" 1000."""
+    w = w.lower()
+    if not w or not w.isalpha():
+        return None
+    if "tausend" in w:
+        left, _, right = w.partition("tausend")
+        lv = 1 if left in ("", "ein") else _de_lt1000(left)
+        rv = 0 if right == "" else _de_lt1000(right.removeprefix("und"))
+        if lv is None or rv is None:
+            return None
+        return lv * 1000 + rv
+    return _de_lt1000(w)
+
+
+# --- keyterms ---------------------------------------------------------------------
+
+_FOREIGN = re.compile(r"(?i)c(?![hk])|(?<!s)ch(?=[aeiouy])|y|q(?!u)|^j(?=[^aeiouäöü])|[a-z]w$|ph")
+
+
+def keyterms(text, code=None):
+    """Distinctive words of a script, in order: names, products, jargon, numbers. English: capitalised or with a
+    digit, not a common word. German: with a digit, an inner capital (ChatGPT), all caps (KI), or spelled the way
+    German rarely spells (Claude, Cursor), not a common word."""
+    P = pack(code)
+    out, seen = [], set()
+    for w in re.findall(r"[\wÄÖÜäöüß][\w.+#'-]*[\w+#]|[\wÄÖÜäöüß]", text):
+        w = re.sub(r"'s$", "", w)
+        low = w.lower()
+        if len(w) < 2 or low in P.common or low in seen:
+            continue
+        digit = any(c.isdigit() for c in w)
+        if P.code == "de":
+            inner = any(c.isupper() for c in w[1:]) and not w.isupper()
+            caps = w.isupper() and len(w) >= 2 and w.isalpha()
+            foreign = w[0].isupper() and bool(_FOREIGN.search(w))
+            keep = digit or inner or caps or foreign
+        else:
+            keep = w[0].isupper() or digit
+        if keep:
+            seen.add(low)
+            out.append(w)
+    return out
+
+
+def demo():
+    import tempfile
+    assert pack("de-DE").code == "de" and pack("german").code == "de" and pack("fr").code == "en"
+    assert fold_de("fünfundzwanzig") == 25 and fold_de("zweihundertfünfzig") == 250
+    assert fold_de("dreitausendvierhundert") == 3400 and fold_de("hundert") == 100 and fold_de("tausend") == 1000
+    assert fold_de("einhundertundeins") == 101 and fold_de("zwölf") == 12 and fold_de("dreißig") == 30
+    assert fold_de("hundertachtzig") == 180 and fold_de("neunzehnhundert") is None   # a year: left as a word
+    assert fold_de("stunde") is None and fold_de("und") is None and fold_de("hund") is None
+    assert DE.meta.search("ach mist, ich fang nochmal von vorne an") and DE.meta.search("warte mal")
+    assert not DE.meta.search("das mache ich nochmal anders"), "nochmal alone is an ordinary word"
+    assert "äh" in DE.hard_fillers and "eh" not in DE.hard_fillers
+    k = keyterms("Heute zeige ich euch, wie ich mit Claude Code und ChatGPT in 15 Minuten eine App baue. "
+                 "Die KI schreibt den Code, Cursor macht den Rest.", "de")
+    assert k == ["Claude", "Code", "ChatGPT", "15", "KI", "Cursor"], k
+    assert keyterms("Today I built it with Claude Code and GPT-4o.", "en") == ["Claude", "Code", "GPT-4o"]
+    with tempfile.TemporaryDirectory() as t:
+        assert of(t) == "en"
+        set_meta(t, lang="de", engine="whispercpp")
+        assert of(t) == "de" and get_meta(t)["engine"] == "whispercpp"
+        os.environ["MM_LANG"] = "en"
+        assert of(t) == "en"
+        del os.environ["MM_LANG"]
+    print("lang demo ok")
+
+
+if __name__ == "__main__":
+    import sys
+    if sys.argv[1:] == ["demo"]:
+        demo()
