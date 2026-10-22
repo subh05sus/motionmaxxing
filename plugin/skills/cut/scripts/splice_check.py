@@ -45,8 +45,8 @@ def check(d, fix=False, reach_s=REACH_S):
     print(f"splices    {len(bad)} join(s) in speech" + (": " + ", ".join(f"{t:.2f}s" for t in bad[:10]) if bad else ""))
     if not bad or not fix:
         return 1 if bad else 0
-    if (d / "lead.json").exists():   # frames are in play order, not source order: neighbours are wrong
-        print("splices    lead.json reorders the cut: not moved. Rebuild, then listen to these joins.")
+    if (d / "lead.json").exists() or (d / "moves.json").exists():   # frames in play order: neighbours are wrong
+        print("splices    lead.json or moves.json reorders the cut: not moved. Rebuild, then listen to these joins.")
         return 1
     toks = [t for t in B.load_fitted(d) if t.get("type") in ("word", "audio_event")]
     words = [t for t in toks if t["type"] == "word"]

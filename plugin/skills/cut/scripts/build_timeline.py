@@ -7,6 +7,9 @@ Reads   <edit_dir>/words.raw.json   the transcript of the source
         <edit_dir>/spans.json       what to remove, QUOTED from the transcript
         <edit_dir>/lead.json        optional, one quoted range that plays first (an alternate
                                     hook recorded after the body; retakes.py hook writes it)
+        <edit_dir>/moves.json       optional, [{"text", "after", "before": {"text", "after"}}]: a quoted range played
+                                    just before another quoted phrase (a calmer later take of a line, used ahead
+                                    of the earlier take of the line after it)
         <edit_dir>/keep.json        optional, [{"start": s, "end": e}] raw-take seconds no pause trim
                                     may remove (words or pauses the user put back on the review page)
 Writes  <edit_dir>/decisions.json   kept spans in source seconds (docs/CONTRACTS.md)
@@ -154,6 +157,8 @@ def edge(left, right, pad, from_left):
 # One frame at 30 fps is 33 ms, so padding cannot buy the room; leaving a little
 # more of the pause in front of it can.
 SHORT_WORD_S = 0.12
+MIN_TRIM_S = 0.12        # a pause trim that removes less than this is a jump in the picture that saves nothing: the
+                         # pause stays (one take had seven 0.03-0.10 s trims inside sentences; its editor made none)
 SLIVER_FRAMES = 3        # a kept piece this short (or shorter) is dropped: no word fits in 0.1 s
 MIN_PIECE_S = 0.45       # a pause trim never leaves a kept piece shorter than this (it stays a pause instead)
 MAX_RESTORE_S = 0.8      # ... when that pause is at most this long
@@ -390,7 +395,7 @@ def silence_cuts(words, gap_max, gap_keep, heard):
         nxt = next((w for w in words if w["start"] >= b - 0.05), None)
         keep = max(gap_keep, RUNWAY_S) if nxt and nxt["end"] - nxt["start"] < SHORT_WORD_S else gap_keep
         s, e = a + keep / 2, b - keep / 2
-        if e - s >= 0.04:
+        if e - s >= MIN_TRIM_S:
             out.append({"start": s, "end": e, "kind": "silence", "confidence": "high",
                         "evidence": f"{b - a:.2f}s silence", "note": f"tightened to {keep:.2f}s"})
     return out
@@ -656,6 +661,29 @@ def lead_first(frames, a, b):
     return [f for f in cut if a <= f[0] and f[1] <= b] + [f for f in cut if not (a <= f[0] and f[1] <= b)]
 
 
+def move_before(frames, a, b, t):
+    """Kept frame ranges with source frames [a, b) moved to play just before the kept range at or after frame t
+    (lead_first is the case t = 0). A range that holds t is split there."""
+    cut = []
+    for s, e in frames:
+        cut += [[x, y] for x, y in ((s, min(e, a)), (max(s, a), min(e, b)), (max(s, b), e)) if y > x]
+    moved = [f for f in cut if a <= f[0] and f[1] <= b]
+    rest = []
+    for s, e in (f for f in cut if not (a <= f[0] and f[1] <= b)):
+        rest += [[s, t], [t, e]] if s < t < e else [[s, e]]
+    at = next((k for k, f in enumerate(rest) if f[0] >= t), len(rest))
+    return rest[:at] + moved + rest[at:]
+
+
+def quoted_range(q, toks, kind):
+    """A quote ({"text", "after"}) resolved to its tokens' edges, split halfway into the pauses either side so no
+    word is halved: (start, end) in seconds."""
+    c = resolve_spans([{**q, "kind": kind}], toks)[0]
+    before = max([t["end"] for t in toks if t["end"] <= c["start"]], default=0.0)
+    after = min([t["start"] for t in toks if t["start"] >= c["end"]], default=c["end"])
+    return (before + c["start"]) / 2, (c["end"] + after) / 2
+
+
 def is_kept(w, spans):
     """A word plays if at least 0.1 s (or half of it, if shorter) is inside a kept
     span. Overlap, not onset or midpoint: transcribers stretch a word into the
@@ -775,6 +803,20 @@ def main():
         after = min([t["start"] for t in toks if t["start"] >= lc["end"]], default=dur)
         frames = lead_first(frames, round((before + lc["start"]) / 2 * fps), round((lc["end"] + after) / 2 * fps))
         print(f"lead       {lc['evidence'][:60]!r} plays first")
+    mv = d / "moves.json"
+    if mv.exists():   # a later take of a line played before an earlier one: [{"text", "after", "before": {"text", "after"}}]
+        for m in json.loads(mv.read_text(encoding="utf-8")):
+            a_, b_ = quoted_range({k: m[k] for k in ("text", "after", "occurrence") if k in m}, toks, "manual")
+            t_, _ = quoted_range(m["before"], toks, "manual")
+            frames = move_before(frames, round(a_ * fps), round(b_ * fps), round(t_ * fps))
+            print(f"move       {m['text'][:40]!r} ({a_:.2f}s) plays before {m['before']['text'][:30]!r} ({t_:.2f}s)")
+    if (lead.exists() or mv.exists()) and frames:   # the piece that plays last rings out too, wherever it sits in the take
+        s_, e_ = frames[-1]
+        inside = [w for w in kept_words if s_ / fps - 0.02 <= w["start"] < e_ / fps]
+        if inside:
+            last = max(w["end"] for w in inside)
+            nxt = min([t["start"] for t in toks if t["start"] >= last + 0.01], default=dur)
+            frames[-1][1] = max(e_, min(nframes, math.ceil(min(last + END_TAIL_S, nxt - 0.05, dur) * fps)))
     # A kept piece of 3 frames or less is never a word, whatever the labels say (Whisper squeezes a fast run of words
     # into a frame or two): played, it is a click or half a syllable at a join. Dropped, after the joins have moved.
     slivers = [(s_ / fps, e_ / fps) for s_, e_ in frames if e_ - s_ <= SLIVER_FRAMES]

@@ -122,6 +122,25 @@ def main():
     return rc
 
 
+def heard_as_line(d, toks, sa, sb):
+    """True when rehear.json heard toks (a run of words in the render, source sa-sb) inside a stretch it kept as the
+    line: each word in that stretch's hearing."""
+    f = Path(d) / "rehear.json"
+    if not f.exists() or not toks:
+        return False
+    import rehear
+    for p in json.loads(f.read_text(encoding="utf-8")).get("pieces", []):
+        if not p.get("now"):
+            continue
+        for a, b, kind, text in p["heard"]:
+            if kind != "speech" or not (a - 0.15 <= sa and sb <= b + 0.15 and p["now"][0] - 0.05 <= a):
+                continue
+            words = rehear.norm_words(text)
+            if all(any(rehear.sim(t, w) >= 0.75 for w in words) for t in toks if t not in FILLERS):
+                return True
+    return False
+
+
 def report(d, expected, actual, removed, same, differ, gone, new, act=None, spans=None, raw=None):
     missing = [(i, expected[i]) for i in gone]
     extra = [actual[j] for j in new]
@@ -143,7 +162,12 @@ def report(d, expected, actual, removed, same, differ, gone, new, act=None, span
     rep = json.loads((d / "report.json").read_text(encoding="utf-8")) if (d / "report.json").exists() else {"model_cuts": []}
     noise = [t for _, t in missing if t in FILLERS] + [t for t in extra if t in FILLERS]
     missing = [(i, t) for i, t in missing if t not in FILLERS]
-    survived = [t for t in extra if t not in FILLERS and fragment(t)]
+    # rehear.py heard the take's own audio at every piece's edges: words it heard as the kept line, right where the
+    # render has them, are the line with a wrong label in the raw transcript ("Und" labelled 0.7 s early), not a survivor
+    line_runs = [r for r in runs if act and spans and heard_as_line(d, actual[r[0]:r[1]], to_source(act[r[0]][1], spans),
+                                                                   to_source(act[r[1] - 1][2], spans))]
+    runs = [r for r in runs if r not in line_runs]
+    survived = [actual[j] for j1, j2 in runs for j in range(j1, j2) if actual[j] not in FILLERS and fragment(actual[j])]
 
     print(f"expected {len(expected)} words, heard {len(actual)}, match {len(same) / max(1, len(expected)) * 100:.1f}%")
     if missing:
@@ -169,6 +193,10 @@ def report(d, expected, actual, removed, same, differ, gone, new, act=None, span
                               " not a repeat: never cut a kept line for it")
                     elif add:
                         print(f"    span to add, if it is a real repeat: {json.dumps(add)}")
+    if line_runs:
+        print(f"\nTHE LINE, LABELS OFF ({len(line_runs)}): kept words the raw transcript timed elsewhere; rehear.py heard them "
+              "as the line right here (not a cut error): " + ", ".join(
+                  f"[{' '.join(actual[j1:j2])}] {to_source(act[j1][1], spans):.2f}s" for j1, j2 in line_runs))
     if heard:
         print(f"\nHEARD DIFFERENTLY ({sum(heard.values())}), the same time in the cut spelled another way by the second "
               "pass (a misheard name, not a cut error; captions take the cut's spelling):")

@@ -84,6 +84,10 @@ async function rebuild(id: string, why: string): Promise<void> {
     step(id, "Cutting out the mistakes");
     const b = await runScript([path.join(CUT, "build_timeline.py"), src, d]);
     if (b.code) throw new Error(b.err.trim().split("\n").slice(-2).join(" "));
+    // every join heard again: the half word or false start a transcript hides (rehear.py); a failure here leaves the
+    // cut as built rather than stopping it
+    step(id, "Listening to every join");
+    await runScript([path.join(CUT, "rehear.py"), d, "--fix"]);
     step(id, "Rendering the cut");
     const r = await runScript([path.join(CUT, "render.py"), src, d]);
     if (r.code) throw new Error(r.err.trim().split("\n").slice(-2).join(" "));

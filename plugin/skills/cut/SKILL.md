@@ -108,8 +108,14 @@ into `candidates.md`. Each is a place to look, not a decision. Read `transcript.
 
 With a `script.md`: `python3 "$S/script_match.py" edits/<name>`, read `script-match.md` (`references/script.md`).
 
-Last take wins, except alternate hooks. Never type a timestamp or span a
-pause.
+Last take wins, except alternate hooks, and the ending is no exception: a call to action said again and again at the
+end of the take is a set of takes like any line (the last clean one wins; one owner's best ending was spread over
+three lines recorded minutes apart). Never type a timestamp or span a pause.
+
+A calmer later take of a line that has to play before an earlier take of the next line (the take's order is not the
+video's): `moves.json`, `[{"text": "<the later take, quoted>", "after": <s>, "before": {"text": "<the next line>",
+"after": <s>}}]`. The build plays the quoted range just before that line, and the piece that plays last gets the
+ending's ring-out.
 
 **When takes are close** (two complete takes of the same line, neither broken, or the last one a little worse), look
 before you pick:
@@ -135,7 +141,21 @@ python3 "$S/build_timeline.py" <source> edits/<name> && python3 "$PY" "$S/mirror
 ```
 
 Every pause (breaths too) over `--max-pause` (0.15 s) becomes 0.10 s; under music only word gaps
-are trimmed. A build `ERROR` writes nothing: fix that span and run it again.
+are trimmed. A trim that would remove under 0.12 s is not made: inside a sentence it is a jump in the picture that
+saves nothing. A build `ERROR` writes nothing: fix that span and run it again.
+
+Then hear the joins again (every build, before every render):
+
+```bash
+python3 "$PY" "$S/rehear.py" edits/<name> --fix
+```
+
+Whisper times words worst where a line is started again (a restarted line labelled a second early), so a cut quoted
+from its words can begin inside the take before: a half word, a false start, a breath ("From then on it lear- | From
+then on it learns..."), which every transcript of the cut misses (the second hearing writes the restart once too).
+`rehear.py` splits each piece's edges into stretches of speech by the audio, hears each alone, and cuts the ones that
+are not the line: the end of the take before, a sound or a breath, a false start, a line said twice over a join. It
+prints each cut with its time in the video, and moves the words heard there into the piece (words.json, captions).
 
 `mirror.py` says `mirrored` when a book, shirt or sign reads backwards (a front-camera take): ask once,
 **Keep it as shot (Recommended)** (most creators post it that way) / **Flip it so the text reads**; on a
@@ -160,6 +180,7 @@ Foreground (render.py waits for the background encode):
 
 ```bash
 python3 "$S/build_timeline.py" <source> edits/<name> && \
+python3 "$PY" "$S/rehear.py" edits/<name> --fix && \
 python3 "$S/render.py" <source> edits/<name> && \
 python3 "$PY" "$S/verify_cut.py" edits/<name> --engine <same engine as step 1>
 ```
@@ -169,6 +190,8 @@ Verify clean: the cut is ready, and the studio's page for the video shows it by 
 - **SURVIVED**: verify prints a `HEAL first` line: run it (the stretches are heard again on their own), then step 2
   (`retakes.py propose`) on the healed words, add the span for the real repeat or stumble, never one that cuts a kept
   line, and run 3-5 again. That is the one fix cycle.
+- **THE LINE, LABELS OFF**: kept words the raw transcript timed elsewhere, which rehear.py heard as the line right
+  there: not a cut error, no rebuild.
 - **HEARD DIFFERENTLY** ("lumo -> jeff") and filler notes are transcriber variance: no rebuild.
 - **DOUBLED**: words said twice in a row. Natural ("very, very"): keep. A stumble: add its span.
 - **N join(s) in speech**: listen. Clipped: `splice_check.py edits/<name> --fix`, re-render.
@@ -214,4 +237,4 @@ ask for the edit. Never start the edit on your own.
 
 ## Self-check
 
-`test_build_timeline.py`, `test_retakes.py`, `test_media.py` (ffmpeg); `demo` on `transcribe.py`, `trend.py`, `splice_check.py`, `script_match.py`, `mirror.py`, `takes.py`.
+`test_build_timeline.py`, `test_retakes.py`, `test_media.py` (ffmpeg); `demo` on `transcribe.py`, `trend.py`, `splice_check.py`, `script_match.py`, `mirror.py`, `takes.py`, `rehear.py`.

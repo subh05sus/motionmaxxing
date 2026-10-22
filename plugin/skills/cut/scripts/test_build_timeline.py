@@ -223,6 +223,30 @@ def test_zero_length_word_inside_a_cut_is_removed():
     assert B.is_kept({"text": "I", "start": 64.5, "end": 64.5, "type": "word"}, spans)
 
 
+def test_short_pause_trims_are_not_made():
+    """A 0.20 s pause inside a sentence trimmed to 0.10 s is a 0.10 s jump in the picture that saves nothing (one take
+    had seven of them; its editor made none). Under MIN_TRIM_S removed, the pause stays; a 0.5 s one is still tightened."""
+    ws = [{"text": "an", "start": 0.0, "end": 0.3, "type": "word"},
+          {"text": "agent", "start": 0.5, "end": 1.0, "type": "word"},
+          {"text": "done.", "start": 1.0, "end": 1.4, "type": "word"},
+          {"text": "Next", "start": 1.9, "end": 2.1, "type": "word"}]
+    cuts = B.silence_cuts(ws, 0.15, 0.1, [(0.3, 0.5), (1.4, 1.9)])
+    assert [(round(c["start"], 2), round(c["end"], 2)) for c in cuts] == [(1.45, 1.85)], cuts
+
+
+def test_move_before():
+    """moves.json: the calmer last take of a line (source 300-310) plays before the earlier take of the next line
+    (source 280-290), whatever the source order; a kept range holding the target is split there."""
+    frames = [[0, 100], [280, 290], [300, 310]]
+    assert B.move_before(frames, 300, 310, 280) == [[0, 100], [300, 310], [280, 290]]
+    assert B.move_before(frames, 300, 310, 50) == [[0, 50], [300, 310], [50, 100], [280, 290]]
+    assert B.move_before(frames, 300, 310, 0) == B.lead_first(frames, 300, 310)
+    spans = [{"start": a / 10, "end": b / 10} for a, b in B.move_before(frames, 300, 310, 280)]
+    w = B.retime([{"text": "how", "start": 30.2, "end": 30.5, "type": "word"},
+                  {"text": "show", "start": 28.1, "end": 28.4, "type": "word"}], spans)
+    assert [x["text"] for x in w] == ["how", "show"] and w[0]["start"] == 10.2, w
+
+
 if __name__ == "__main__":
     test_derive()
     test_audible_end()
@@ -237,4 +261,6 @@ if __name__ == "__main__":
     test_splice_never_reaches_a_removed_word()
     test_keep_ranges_survive_the_pause_trim()
     test_zero_length_word_inside_a_cut_is_removed()
+    test_short_pause_trims_are_not_made()
+    test_move_before()
     print("all ok")
