@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { Command, FileCheck2, Film, House, Library, MonitorPlay, Palette, PanelLeft, PanelRight, Plus, Search, Settings } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Celebrate, type Moment } from "@/components/celebrate";
 import { ChatPanel } from "@/components/chat";
 import { Palette as CommandPalette } from "@/components/palette";
 import { api, useApi, useEvents } from "@/lib/api";
@@ -61,12 +62,19 @@ export function App() {
 
   // A cut finished, Claude asked something: say so, even from another app.
   const seen = useState(() => new Map<string, string>())[0];
+  const [moment, setMoment] = useState<Moment | null>(null);
+  const clearMoment = useCallback(() => setMoment(null), []);
   useEvents((type, data) => {
     if (type !== "video" || !data?.id) return;
-    api<{ title: string; status: string }>(`/api/videos/${encodeURIComponent(data.id)}`).then((v) => {
+    api<{ title: string; status: string; progress?: { step: string; done?: boolean } }>(`/api/videos/${encodeURIComponent(data.id)}`).then((v) => {
       const before = seen.get(data.id);
-      seen.set(data.id, v.status);
-      if (before && before !== v.status && v.status === "ready") notify("The cut is ready", v.title);
+      const key = `${v.status}|${v.progress?.step ?? ""}`;
+      seen.set(data.id, key);
+      if (!before || before === key) return;
+      const href = `/videos/${encodeURIComponent(data.id)}`;
+      if (v.status === "ready" && !before.startsWith("ready")) { notify("The cut is ready", v.title); setMoment({ id: Date.now(), title: "The cut is ready", body: v.title, href }); }
+      if (v.status === "editing" && !before.startsWith("editing")) { notify("The edit is ready", v.title); setMoment({ id: Date.now(), title: "The edit is ready", body: v.title, href }); }
+      if (v.progress?.step === "Exported" && v.progress.done && !before.endsWith("|Exported")) { notify("Exported", v.title); setMoment({ id: Date.now(), title: "Exported", body: "Final Cut, Premiere, Resolve, CapCut and the handoff folder" }); }
     }).catch(() => undefined);
   });
 
@@ -140,6 +148,7 @@ export function App() {
         </div>
       </div>
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
+      <Celebrate moment={moment} onDone={clearMoment} />
       {/* Phone: a floating tab bar of glass, iOS style. */}
       <nav className="liquid-glass fixed inset-x-4 bottom-[max(env(safe-area-inset-bottom),12px)] z-40 flex h-[62px] items-center justify-around rounded-full md:hidden">
         {NAV.slice(0, 3).concat({ href: "/settings", label: "Settings", icon: Settings }).map(({ href, label, icon: Icon }) => {

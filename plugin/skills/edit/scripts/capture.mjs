@@ -7,7 +7,7 @@
 // ~/.motionmaxxing/remotion (MM_HOME overrides) over the DevTools pipe.
 // Per beat, optional: "clip": [x, y, w, h] in page px, or "selector": "css" (the element, padded),
 // "width" (viewport px, default 1000), "height" (default 700), "wait_ms" (default 2500),
-// "box", "hold_s", "entrance" (passed on to the card), "highlight": "an exact sentence on the page"
+// "box", "hold_s", "entrance", "layout", "layer" (passed on to the card), "highlight": "an exact sentence on the page"
 // (the shot runs from the clip down past that sentence, and images.json gets the sentence's line boxes
 // so the card scrolls to it and sweeps a highlighter over it), "marks": [{"kind", "find": "text on the
 // page", "at_word"}] (rect measured from the text, in the PNG's px), "page_text": true (writes the page's
@@ -802,7 +802,7 @@ async function main() {
       const got = await source(edit, b);
       if (!got) return null;
       const im = { src: got.src, word: b.word, size: got.size };
-      for (const k of ["nth", "box", "hold_s", "entrance", "layout", "marks"]) if (b[k] !== undefined) im[k] = b[k];
+      for (const k of ["nth", "box", "hold_s", "entrance", "layout", "layer", "marks"]) if (b[k] !== undefined) im[k] = b[k];
       console.log(`${got.src}  <- ${got.from}`);
       return im;
     } catch (e) {
@@ -817,7 +817,7 @@ async function main() {
     try {
       return (await pool(beats, TABS, async (b, i) => {
         const src = `${PREFIX}${i + 1}-${slug(b.word)}.png`;
-        const { word, nth, box, hold_s, entrance, layout, ...how } = b;   // what changes the picture
+        const { word, nth, box, hold_s, entrance, layout, layer, ...how } = b;   // what changes the picture (where it sits does not)
         const key = cacheKey(["capture", SELF, how]);
         const hit = cacheGet("captures", key);
         let shot;
@@ -835,7 +835,7 @@ async function main() {
           return null;
         }
         const im = { src, word: b.word, size: shot.size };
-        for (const k of ["nth", "box", "hold_s", "entrance", "layout"]) if (b[k] !== undefined) im[k] = b[k];
+        for (const k of ["nth", "box", "hold_s", "entrance", "layout", "layer"]) if (b[k] !== undefined) im[k] = b[k];
         if (shot.highlight) im.highlight = shot.highlight;
         if (shot.marks.length) im.marks = shot.marks;
         if (shot.xh) im.xh = shot.xh;

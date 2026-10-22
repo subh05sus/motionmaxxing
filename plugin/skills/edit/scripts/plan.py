@@ -2449,7 +2449,8 @@ def caption_under_chin(cap, face, aspect, above=False, tall=1.0):
 def clear_chin(zooms, face, cap):
     """A push zoom grows the head from its top, so the chin moves down into captions set under it. Each zoom's scale
     is held to what keeps the chin (face.json's head bottom less the chin margin) above the captions' ink; one
-    held under 1.02 is dropped."""
+    held under 1.02 is dropped. When the chin is already at the captions before any zoom (the take's own framing),
+    the zoom keeps its scale and grows from the eyes instead."""
     top = cap["y_pct"] - CAP_GLYPH * (cap.get("size_pct") or 4.4)
     out = []
     for z in zooms:
@@ -2457,6 +2458,15 @@ def clear_chin(zooms, face, cap):
         oy = (z.get("origin") or [50, 30])[1]
         chin = hd and hd[3] - CHIN_SHARE * (hd[3] - hd[1])
         want = z.pop("want", z["scale"])
+        if chin and chin >= top:
+            # The take's own framing already has the captions over the chin (a close, low head, as most phone
+            # takes are): a zoom cannot put them on the face more than the footage does. Keep the creator's punch,
+            # grown from the eyes so the face stays where it is, held so the eyes stay inside the safe zone.
+            eyes = hd[1] + EYES_SHARE * (hd[3] - hd[1])
+            k = min(want, 1.3, 100 / max(1, hd[2] - hd[0]))
+            if k >= 1.02 and eyes >= SAFE["9:16"][1]:
+                out.append({**z, "scale": round(k, 3), "origin": [(z.get("origin") or [50, 30])[0], round(eyes, 1)]})
+            continue
         if chin and chin > oy:
             k = (top - oy) / (chin - oy)
             # held under the creator's punch: grow from the chin instead, the head rising (her 2x on a close shot
@@ -3466,7 +3476,9 @@ def demo():
     # a push zoom from the head's top is held so the chin stays above the captions; one that cannot move is dropped
     zz = clear_chin([{"start": 0, "end": 2, "scale": 1.15, "origin": [59, 31]}, {"start": 2, "end": 4, "scale": 1.15, "origin": [59, 70]}], fc, cp)
     assert zz[0]["scale"] == 1.15 and zz[0]["origin"][1] == 68.3 and zz[1]["scale"] == 1.15, zz   # grown from the chin instead: the head rises, kept
-    assert clear_chin([{"start": 0, "end": 2, "scale": 1.15, "origin": [59, 31]}], fc, {"y_pct": 68, "size_pct": 4.4}) == []
+    # the chin already at the captions before any zoom (a close, low head): the punch is kept, grown from the eyes
+    assert clear_chin([{"start": 0, "end": 2, "scale": 1.15, "origin": [59, 31]}], fc, {"y_pct": 68, "size_pct": 4.4}) == \
+        [{"start": 0, "end": 2, "scale": 1.15, "origin": [59, 49.7]}]
     # one capture per page: the second capture of the same URL is dropped
     vis = [{"kind": "capture", "word": "a", "url": "https://x.dev/"}, {"kind": "capture", "word": "b", "url": "https://x.dev"},
            {"kind": "capture", "word": "c", "url": "https://y.dev"}]
