@@ -78,7 +78,7 @@ function RecorderGroup() {
       {list.map(([h]) => (
         <div key={h} className="flex min-h-9 items-center gap-3 px-3">
           <span className="grid size-6 shrink-0 place-items-center rounded-[6px] bg-foreground/8 text-muted-foreground"><Globe className="size-3.5" /></span>
-          <span className="flex-1">{h}</span>
+          <span className="flex-1">{h === "*" ? "Every website" : h}</span>
           <span className="caption">allowed</span>
           <button title="Ask again next time" onClick={async () => { await api(`/api/recorder/sites/${encodeURIComponent(h)}`, { method: "DELETE" }); sites.reload(); }} className="grid size-6 place-items-center rounded-md text-faint-foreground hover:bg-foreground/8 hover:text-foreground"><X className="size-3.5" /></button>
         </div>

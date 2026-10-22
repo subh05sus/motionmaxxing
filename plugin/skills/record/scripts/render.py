@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Finish a recording: the waiting sped up, a camera that follows the action, a smooth cursor with clicks, a Mac window.
 
-    python3 render.py <recording dir> [--aspect 16:9|9:16|1:1|4:5] [--fps 30] [--out demo.mp4] [--width N]
+    python3 render.py <recording dir> [--aspect 16:9|9:16|1:1|4:5|10:7] [--fps 30] [--out demo.mp4] [--width N]
                       [--zoom Z] [--look window|bare] [--no-cursor] [--badge] [--bg #141518]
     python3 render.py demo
 
@@ -29,9 +29,10 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 FONT = "/System/Library/Fonts/SFNS.ttf"
-ASPECTS = {"16:9": (16, 9), "9:16": (9, 16), "1:1": (1, 1), "4:5": (4, 5)}
-WIDTH = {"16:9": 1920, "9:16": 1080, "1:1": 1080, "4:5": 1080}
-ZMAX = {"16:9": 2.0, "9:16": 2.8, "1:1": 2.4, "4:5": 2.5}
+# 10:7 is the half-screen panel of a vertical edit (edit plan.py: the art box of a per-beat split, 959 x 670 px)
+ASPECTS = {"16:9": (16, 9), "9:16": (9, 16), "1:1": (1, 1), "4:5": (4, 5), "10:7": (10, 7)}
+WIDTH = {"16:9": 1920, "9:16": 1080, "1:1": 1080, "4:5": 1080, "10:7": 1200}
+ZMAX = {"16:9": 2.0, "9:16": 2.8, "1:1": 2.4, "4:5": 2.5, "10:7": 2.2}
 S = 2          # canvas pixels per CSS pixel (the recorder's device scale)
 TB = 44        # the window's toolbar, CSS px
 RADIUS = 12    # window corners, CSS px

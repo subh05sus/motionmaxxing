@@ -17,7 +17,8 @@ A recording lives in the library: `<library>/recordings/<name>/` (`python3 "${CL
 
 ## 1. The site: ask once, sign in once
 
-`node "$R" sites` lists the sites the user allowed. A site not in it: ask once, before anything touches it:
+`node "$R" sites` lists the sites the user allowed; `"*"` means every site (the user said "allow all websites":
+`node "$R" allow all`), so never ask. Otherwise, a site not in it: ask once, before anything touches it:
 "Claude drives <site> in its own recording browser: it clicks, types and records there (signed in only if you
 sign in to it). Allow <site>?" Options: "Allow <site>", "Not this site". On yes: `node "$R" allow <host>`. Never ask again
 for that site. localhost is always allowed.

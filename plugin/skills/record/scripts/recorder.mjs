@@ -54,6 +54,7 @@ function allowed(u) {
   if (!h) return false;
   if (h === "localhost" || h === "127.0.0.1") return true;   // the studio itself and local dev servers
   const s = readSites();
+  if (s["*"]) return true;   // the user allowed every site (`allow all`); the destructive-click guard still holds
   return Object.keys(s).some((k) => h === k || h.endsWith("." + k));
 }
 
@@ -490,12 +491,12 @@ const cmd = a[0];
 if (cmd === "sites") {
   console.log(JSON.stringify(readSites(), null, 1));
 } else if (cmd === "allow" && a[1]) {
-  const h = host(a[1].includes("://") ? a[1] : "https://" + a[1]);
+  const h = a[1] === "all" || a[1] === "*" ? "*" : host(a[1].includes("://") ? a[1] : "https://" + a[1]);
   const s = readSites();
   s[h] = { allowed: new Date().toISOString() };
   fs.mkdirSync(path.dirname(SITES), { recursive: true });
   fs.writeFileSync(SITES, JSON.stringify(s, null, 1));
-  console.log(`allowed: ${h}`);
+  console.log(h === "*" ? "allowed: every site" : `allowed: ${h}`);
 } else if (cmd === "login" && a[1]) {
   await login(a[1], Number(arg(a, "--minutes", 15)));
 } else if (cmd === "look" && a[1]) {

@@ -57,7 +57,10 @@ export function lastProgress(id: string): { step: string; detail?: string; progr
       try {
         const tail = readFileSync(path.join(editDir(id), path.basename(last.detail)), "utf8").slice(-4000);
         const m = [...tail.matchAll(/Rendered (\d+)\/(\d+)/g)].pop();
-        if (m) return { ...last, detail: `${m[1]} of ${m[2]} frames`, progress: Number(m[1]) / Number(m[2]) };
+        // t: the log's newest line, so a long render stays "working" for as long as it writes
+        const t = Math.max(last.t, mtime(path.join(editDir(id), path.basename(last.detail))) / 1000);
+        const done = /^rendered .+ in [\d.]+ s$/m.test(tail) || undefined;   // the renderer's last line
+        if (m) return { ...last, t, done, detail: `${m[1]} of ${m[2]} frames`, progress: Number(m[1]) / Number(m[2]) };
       } catch { /* not started yet */ }
       return { ...last, detail: undefined };
     }
@@ -68,10 +71,26 @@ export function lastProgress(id: string): { step: string; detail?: string; progr
 export function notes(id: string): Note[] { return readJson<Note[]>(path.join(editDir(id), "notes.json"), []); }
 export function saveNotes(id: string, n: Note[]): void { writeFileSync(path.join(editDir(id), "notes.json"), JSON.stringify(n, null, 1)); }
 
+/** A render running now, started here or anywhere else (a terminal, Claude's own session): its log (edit.py deletes it
+ *  first) was written in the last 90 s and has not printed its last line, or the render was just announced in
+ *  progress.jsonl and the renderer is still bundling. The old render.mp4 stays until the new one replaces it, so
+ *  its time alone can't tell: a re-render with the same plan read as "edit ready" the whole time. */
+export function rendering(id: string): boolean {
+  const lm = mtime(path.join(editDir(id), "render.renderer.log"));
+  if (!lm) {
+    const p = lastProgress(id);
+    return !!p && p.step === "Making the video" && Date.now() / 1000 - p.t < 60;
+  }
+  if (Date.now() - lm > 90_000) return false;
+  try { return !/^rendered .+ in [\d.]+ s$/m.test(readFileSync(path.join(editDir(id), "render.renderer.log"), "utf8").slice(-600)); }
+  catch { return false; }
+}
+
 /** What exists so far, in plain words: the stage a person sees. "editing" is the edit ready to watch. */
 export function status(id: string): "new" | "transcribing" | "cutting" | "ready" | "making" | "editing" | "approved" {
   const d = editDir(id), r = record(id);
   if (r.stage === "done" || r.approved?.edit) return "approved";
+  if (rendering(id)) return "making";
   const render = mtime(path.join(d, "render.mp4"));
   if (render && render >= mtime(path.join(d, "plan.json"))) return "editing";
   if (r.stage === "edit" || render) return "making";   // the cut is approved: the edit is being made (or re-made)
@@ -102,13 +121,22 @@ export function summary(id: string) {
   };
 }
 
-export function list() {
+/** The videos in the library (an edit folder with a record, a transcript or a source). */
+export function ids(): string[] {
   if (!existsSync(EDITS)) return [];
   return readdirSync(EDITS)
     .filter((n) => !n.startsWith(".") && statSync(path.join(EDITS, n)).isDirectory())
-    .filter((n) => ["studio.json", "words.raw.json", "source.mp4"].some((f) => existsSync(path.join(EDITS, n, f))))
-    .map(summary).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    .filter((n) => ["studio.json", "words.raw.json", "source.mp4"].some((f) => existsSync(path.join(EDITS, n, f))));
 }
+
+export function list() {
+  return ids().map(summary).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+const WATCHED = ["studio.json", "progress.jsonl", "render.renderer.log", "render.mp4", "cut.mp4", "plan.json", "decisions.json",
+  "words.raw.json", "notes.json"];
+/** A cheap fingerprint of a video (its files' times): when it changes, the open pages reload it. */
+export const signature = (id: string): string => WATCHED.map((f) => mtime(path.join(editDir(id), f))).join(",");
 
 /** A word plays when at least 0.1 s of it (or half, if shorter) is inside a kept span (build_timeline.is_kept). */
 export function isKept(w: { start: number; end: number }, spans: { start: number; end: number }[]): boolean {
@@ -160,7 +188,8 @@ export function plan(id: string): PlanSummary | null {
     width: p.width, height: p.height, duration: (p.durationInFrames ?? 0) / (p.fps || 30),
     cards: (p.cards ?? []).map((c: any) => ({
       start: c.start, end: c.end, label: String(label(c)).slice(0, 40), kind: c.format || c.anim?.type || (c.src ? "picture" : "card"),
-      place: c.layout === "background" ? "background" : c.layer === "behind" ? "behind" : c.layout === "scene" ? "scene"
+      // a cutaway (a full-frame clip with no cutout) is the timeline's "Full screen", like a scene
+      place: c.layer === "cutaway" ? "scene" : c.layout === "background" ? "background" : c.layer === "behind" ? "behind" : c.layout === "scene" ? "scene"
         : c.panel === true || (c.panel === undefined && p.layout?.mode === "split") || c.layout === "split" ? "split" : "box",
     })),
     captions: (p.captions?.chunks ?? []).map((c: any) => ({ start: c.start, end: c.end, text: c.text })),

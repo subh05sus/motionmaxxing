@@ -25,6 +25,18 @@ function broadcast(type: string, data: unknown): void {
 }
 claude.onAny((meta: SessionMeta, e?: Ev) => broadcast("session", { meta, kind: e?.k, tone: e && e.k === "status" ? e.tone : undefined }));
 
+// The pages stay live whoever does the work (the studio's jobs, Claude here or in a terminal, a script run by hand):
+// every 2 s a few file times per video; a change pushes "video" to the open pages (a render: its frame count).
+const seen = new Map<string, string>();
+setInterval(() => {
+  if (!sse.size) return;
+  for (const id of lib.ids()) {
+    const sig = lib.signature(id);
+    if (seen.has(id) && seen.get(id) !== sig) broadcast("video", { id });
+    seen.set(id, sig);
+  }
+}, 2000).unref();
+
 // --- jobs: scripts the studio runs itself (no Claude, no tokens) ---------------------------------------------------
 
 const jobs = new Map<string, { name: string; startedAt: string }>();
