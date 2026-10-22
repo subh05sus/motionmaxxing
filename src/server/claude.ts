@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { query, type CanUseTool, type Query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -13,8 +13,11 @@ import { HOME, LIBRARY, PLUGIN, REPO, SESSIONS, inside } from "./paths.js";
  * saved in ~/.motionmaxxing/studio/sessions/ and resume the same Claude session when the user writes again.
  */
 
+/** A file the user attached to a message: saved in the library (POST /api/chat/:id/attach). */
+export interface Attached { name: string; path: string; url: string; kind: "image" | "video" | "file" }
+
 export type Body =
-  | { k: "user"; text: string }
+  | { k: "user"; text: string; files?: Attached[] }
   | { k: "text"; text: string; done: boolean }
   | { k: "tool"; name: string; summary: string; input: string; status: "running" | "ok" | "error"; output?: string }
   | { k: "question"; questions: Question[]; answers?: Record<string, string>; status: "waiting" | "answered" | "cancelled" }
@@ -91,6 +94,29 @@ function toolSummary(name: string, input: Record<string, unknown>): string {
   }
 }
 
+/** What every studio conversation knows about the studio around it, after Claude Code's own system prompt. */
+const STUDIO_RULES = [
+  "You are working inside the motionmaxxing studio, a Mac app: the user reads your replies in its chat panel.",
+  "Whenever the user has something to choose (a direction, a style, which of several fixes, what to do next), ask with the AskUserQuestion tool instead of listing the options in text: 2-4 options, the one you recommend first with \"(Recommended)\" at the end of its label, each with a one-line description. The studio shows them as buttons, plus a field for the user's own answer.",
+  "The user can attach files to a message (images, videos, PDFs, documents). Images come with the message, so you see them; every attached file is also listed with its path in the library. The words of the message are what to do with them.",
+].join("\n");
+
+const IMAGE_MIME: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp" };
+const INLINE_IMAGE_MAX = 5 * 1024 * 1024;   // one image block's limit
+
+/** The message Claude reads: the words, every attached file's path, and the images themselves (so it sees them). */
+function withFiles(text: string, files: Attached[]): SDKUserMessage["message"]["content"] {
+  if (!files.length) return text;
+  const blocks: unknown[] = [{ type: "text", text: `${text}\n\nAttached (saved in the library):\n${files.map((f) => `- ${f.name}: ${f.path}`).join("\n")}` }];
+  for (const f of files) {
+    const mime = IMAGE_MIME[path.extname(f.path).toLowerCase()];
+    try {
+      if (mime && statSync(f.path).size <= INLINE_IMAGE_MAX) blocks.push({ type: "image", source: { type: "base64", media_type: mime, data: readFileSync(f.path).toString("base64") } });
+    } catch { /* gone since: its path is still listed */ }
+  }
+  return blocks as SDKUserMessage["message"]["content"];
+}
+
 function inputQueue(): { iter: AsyncIterable<SDKUserMessage>; push: (m: SDKUserMessage) => void; close: () => void } {
   const items: SDKUserMessage[] = [];
   let wake: (() => void) | null = null, closed = false;
@@ -153,10 +179,10 @@ export class Claude {
 
   /** Send a message: starts (or resumes) Claude when it is not running, or reaches it at its next turn. `prompt`
    * is what Claude reads when it differs from what the page shows (a first message with the studio's context). */
-  send(id: string, text: string, prompt?: string): void {
+  send(id: string, text: string, prompt?: string, files: Attached[] = []): void {
     const s = this.sessions.get(id); if (!s) throw new Error("no such conversation");
-    this.push(s, { k: "user", text });
-    const msg: SDKUserMessage = { type: "user", message: { role: "user", content: prompt ?? text }, parent_tool_use_id: null };
+    this.push(s, { k: "user", text, ...(files.length ? { files } : {}) });
+    const msg: SDKUserMessage = { type: "user", message: { role: "user", content: withFiles(prompt ?? text, files) }, parent_tool_use_id: null };
     const l = this.live.get(id);
     if (l) { clearTimeout(l.idleTimer); l.input.push(msg); this.setStatus(s, "running"); return; }
     this.run(s, msg);
@@ -233,6 +259,7 @@ export class Claude {
         cwd: LIBRARY, abortController: abort, includePartialMessages: true, canUseTool, env,
         settingSources: ["user", "project", "local"], permissionMode: "default", additionalDirectories: [REPO, HOME],
         plugins: [{ type: "local", path: PLUGIN }],
+        systemPrompt: { type: "preset", preset: "claude_code", append: STUDIO_RULES },
         ...(s.claudeSession ? { resume: s.claudeSession } : {}),
       },
     });

@@ -139,6 +139,9 @@ function editPrompt(id: string): string {
     "- Pick the placement per beat and mix them: background (you cut out in front of the visual), half the screen,",
     "  the whole screen, and few small boxes (at most 40%). Real things only: never a text card. Captions are placed by",
     "  plan.py (never on the face, inside the app's safe zone): never set their y by hand.",
+    "- Motion graphics on most lines: the motion skill's kit engine (its references/kit-clips.md), built here in this",
+    "  session (no subagents): scaffold a clip per beat, write it, check it (two at a time), place-kit, plan, align, plan.",
+    "  Never a zoomed website crop as a visual. Hold a full-screen moment about 2 s; at most three layout changes in 10 s.",
     "- Render on this Mac. The studio shows render.mp4 and the plan's timeline by itself: never open a browser or a page.",
     "- Ask only with AskUserQuestion (the studio shows a card).",
     "- End with one short message: the length, the style, how many visuals and where they sit, anything to check.",
@@ -367,12 +370,27 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, s ?? { id: sid, title: "", status: "idle", events: [] });
       }
       if (action === "stream") return streamSession(req, res, sid);
+      // A file for the next message: the body is the file itself (x-filename), kept in <library>/attachments/<chat>/
+      if (action === "attach" && m === "POST") {
+        const name = path.basename(decodeURIComponent(String(req.headers["x-filename"] ?? "file"))).replace(/[^\p{L}\p{N}._ -]+/gu, "_").slice(-120) || "file";
+        const dir = path.join(LIBRARY, "attachments", path.basename(sid));
+        mkdirSync(dir, { recursive: true });
+        const f = path.join(dir, `${Date.now()}-${name}`);
+        await new Promise<void>((resolve, reject) => { const w = createWriteStream(f); req.pipe(w); w.on("finish", resolve); w.on("error", reject); });
+        const ext = path.extname(name).toLowerCase();
+        const kind = /^\.(png|jpe?g|gif|webp|heic)$/.test(ext) ? "image" : /^\.(mp4|mov|m4v|webm)$/.test(ext) ? "video" : "file";
+        return sendJson(res, 200, { name, path: f, kind, url: `/library-file/attachments/${encodeURIComponent(path.basename(sid))}/${encodeURIComponent(path.basename(f))}` });
+      }
       const b = m === "POST" ? await body(req) : {};
       if (action === "send") {
         const edit = b.edit ? lib.editDir(String(b.edit)) : undefined;
         const s = claude.ensure(sid, b.title ?? "Studio", edit);
         const ctx = edit ? `(The user is on the page of the video in ${edit}${typeof b.at === "number" ? `, at ${b.at.toFixed(1)} s` : ""}.)\n\n` : "";
-        claude.send(s.id, String(b.text ?? ""), ctx + String(b.text ?? ""));
+        // only files this chat attached (POST attach): a path from anywhere else is ignored
+        const own = path.join(LIBRARY, "attachments", path.basename(sid));
+        const files = (Array.isArray(b.files) ? b.files : []).filter((f: { path?: string }) => typeof f?.path === "string" && path.resolve(f.path).startsWith(own + path.sep) && existsSync(f.path))
+          .map((f: { name?: string; path: string; url?: string; kind?: string }) => ({ name: String(f.name ?? path.basename(f.path)), path: f.path, url: String(f.url ?? ""), kind: (["image", "video"].includes(String(f.kind)) ? f.kind : "file") as "image" | "video" | "file" }));
+        claude.send(s.id, String(b.text ?? ""), ctx + String(b.text ?? ""), files);
         return sendJson(res, 202, { ok: true });
       }
       if (action === "answer") { claude.answer(sid, b.event, b.answers ?? {}); return sendJson(res, 200, { ok: true }); }

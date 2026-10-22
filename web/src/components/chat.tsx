@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowUp, Check, ChevronRight, CircleStop, Loader2, ShieldQuestion, Sparkles, TriangleAlert, Wrench } from "lucide-react";
+import { ArrowUp, Check, ChevronRight, CircleStop, FileText, Film, Loader2, Paperclip, ShieldQuestion, Sparkles, TriangleAlert, Wrench, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api } from "@/lib/api";
 import { notify } from "@/lib/alerts";
@@ -7,8 +7,10 @@ import { SPRING_DEFAULT } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 export interface Question { question: string; header?: string; multiSelect?: boolean; options: { label: string; description?: string; preview?: string }[] }
+/** A file attached to a message, saved in the library (POST /api/chat/:id/attach). */
+export interface Attached { name: string; path: string; url: string; kind: "image" | "video" | "file" }
 export type Ev = { id: string; seq: number; at: string } & (
-  | { k: "user"; text: string }
+  | { k: "user"; text: string; files?: Attached[] }
   | { k: "text"; text: string; done: boolean }
   | { k: "tool"; name: string; summary: string; input: string; status: "running" | "ok" | "error"; output?: string }
   | { k: "question"; questions: Question[]; answers?: Record<string, string>; status: "waiting" | "answered" | "cancelled" }
@@ -208,7 +210,12 @@ export function ChatThread({ sid, events, emptyHint }: { sid: string; events: Ev
     <div className="space-y-2.5 p-3">
       {groups.map((g) => {
         if (g.k === "tools") return <ToolRun key={g.id} items={g.items} />;
-        if (g.k === "user") return <div key={g.id} className="ml-8 rounded-xl bg-primary/14 px-3 py-2 text-[13px] leading-[18px] whitespace-pre-wrap">{g.text}</div>;
+        if (g.k === "user") return (
+          <div key={g.id} className="ml-8 space-y-1.5 rounded-xl bg-primary/14 px-3 py-2 text-[13px] leading-[18px] whitespace-pre-wrap">
+            {g.files?.length ? <div className="flex flex-wrap gap-1.5">{g.files.map((f) => <FileChip key={f.path} f={f} />)}</div> : null}
+            {g.text}
+          </div>
+        );
         if (g.k === "text") return <div key={g.id} className="px-0.5"><Prose text={g.text} /></div>;
         if (g.k === "question") return <QuestionCard key={g.id} ev={g} onAnswer={(answers) => api(`/api/chat/${sid}/answer`, { json: { event: g.id, answers } }).then(() => undefined)} />;
         if (g.k === "permission") return <PermissionCard key={g.id} ev={g} onDecide={(allow, always) => void api(`/api/chat/${sid}/permit`, { json: { event: g.id, allow, always } })} />;
@@ -221,31 +228,84 @@ export function ChatThread({ sid, events, emptyHint }: { sid: string; events: Ev
 }
 
 /** The composer: a capsule of glass floating at the bottom of the panel. */
-export function Composer({ onSend, onStop, busy, placeholder }: { onSend: (text: string) => Promise<void> | void; onStop?: () => void; busy?: boolean; placeholder?: string }) {
+/** A file on a message or waiting in the composer: an image as a thumbnail, anything else as its name. */
+function FileChip({ f, onRemove, progress }: { f: Pick<Attached, "name" | "kind"> & { url?: string }; onRemove?: () => void; progress?: number }) {
+  const Icon = f.kind === "video" ? Film : FileText;
+  return (
+    <span className="relative inline-flex h-11 max-w-[180px] items-center gap-1.5 overflow-hidden rounded-lg bg-foreground/8 pr-2">
+      {f.kind === "image" && f.url ? <img src={f.url} alt="" className="size-11 shrink-0 object-cover" /> : <span className="grid size-11 shrink-0 place-items-center"><Icon className="size-4 text-muted-foreground" /></span>}
+      <span className="truncate caption">{f.name}</span>
+      {progress !== undefined && progress < 1 && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-primary" style={{ transform: `scaleX(${progress})`, transformOrigin: "0 50%" }} />}
+      {onRemove && <button onClick={onRemove} title="Remove" className="absolute top-0.5 right-0.5 grid size-4 place-items-center rounded-full bg-black/55 text-white"><X className="size-2.5" /></button>}
+    </span>
+  );
+}
+
+type Pending = { key: string; name: string; kind: Attached["kind"]; progress: number; file?: Attached; url?: string; error?: string };
+const kindOf = (f: File): Attached["kind"] => (f.type.startsWith("image/") ? "image" : f.type.startsWith("video/") ? "video" : "file");
+
+export function Composer({ onSend, onStop, busy, placeholder, attach }: { onSend: (text: string, files: Attached[]) => Promise<void> | void; onStop?: () => void; busy?: boolean;
+  placeholder?: string; attach?: (f: File, onProgress: (p: number) => void) => Promise<Attached> }) {
   const [text, setText] = useState("");
+  const [pending, setPending] = useState<Pending[]>([]);
+  const [over, setOver] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const uploading = pending.some((p) => !p.file && !p.error);
+  const ready = pending.filter((p) => p.file).map((p) => p.file!);
+  const add = (list: FileList | File[]) => {
+    if (!attach) return;
+    for (const f of Array.from(list)) {
+      const key = `${f.name}-${f.size}-${Math.random()}`;
+      const url = f.type.startsWith("image/") ? URL.createObjectURL(f) : undefined;
+      setPending((p) => [...p, { key, name: f.name, kind: kindOf(f), progress: 0, url }]);
+      attach(f, (pr) => setPending((p) => p.map((x) => (x.key === key ? { ...x, progress: pr } : x))))
+        .then((file) => setPending((p) => p.map((x) => (x.key === key ? { ...x, progress: 1, file } : x))))
+        .catch((e: Error) => setPending((p) => p.map((x) => (x.key === key ? { ...x, error: e.message } : x))));
+    }
+  };
   const send = async () => {
     const t = text.trim();
-    if (!t) return;
-    setText("");
-    await onSend(t);
+    if ((!t && !ready.length) || uploading) return;
+    setText(""); setPending([]);
+    await onSend(t || "Here are the files.", ready);
   };
   useEffect(() => {
     const el = ref.current; if (!el) return;
     el.style.height = "0px"; el.style.height = `${Math.min(140, el.scrollHeight)}px`;
   }, [text]);
   return (
-    <div className="liquid-glass liquid-glass-dense flex items-end gap-1.5 rounded-[18px] p-1.5 pl-3">
-      <textarea ref={ref} rows={1} value={text} onChange={(e) => setText(e.target.value)} placeholder={placeholder ?? "Ask Claude to change anything…"}
-        onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }}
-        className="min-h-6 flex-1 resize-none bg-transparent py-1 leading-[18px] outline-none placeholder:text-faint-foreground" />
-      {busy && onStop ? (
-        <button onClick={onStop} title="Stop" className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-foreground/10 active:scale-90"><CircleStop className="size-4" /></button>
-      ) : null}
-      <button onClick={() => void send()} disabled={!text.trim()} title="Send"
-        className="grid size-7 place-items-center rounded-full bg-primary text-primary-foreground transition active:scale-90 disabled:bg-foreground/15 disabled:text-faint-foreground">
-        <ArrowUp className="size-4" strokeWidth={2.5} />
-      </button>
+    <div onDragOver={(e) => { if (attach && e.dataTransfer.types.includes("Files")) { e.preventDefault(); setOver(true); } }} onDragLeave={() => setOver(false)}
+      onDrop={(e) => { if (!attach) return; e.preventDefault(); setOver(false); add(e.dataTransfer.files); }}
+      className={cn("liquid-glass liquid-glass-dense rounded-[18px] p-1.5", over && "ring-2 ring-primary")}>
+      {pending.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 px-1.5 pt-0.5 pb-1.5">
+          {pending.map((p) => <span key={p.key} title={p.error}><FileChip f={{ name: p.error ? `Failed: ${p.name}` : p.name, kind: p.kind, url: p.url }} progress={p.progress}
+            onRemove={() => setPending((x) => x.filter((y) => y.key !== p.key))} /></span>)}
+        </div>
+      )}
+      <div className="flex items-end gap-1.5">
+        {attach && (
+          <>
+            <input ref={picker} type="file" multiple hidden onChange={(e) => { if (e.target.files) add(e.target.files); e.target.value = ""; }} />
+            <button onClick={() => picker.current?.click()} title="Attach files or images" className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-foreground/10 active:scale-90">
+              <Paperclip className="size-4" />
+            </button>
+          </>
+        )}
+        <textarea ref={ref} rows={1} value={text} onChange={(e) => setText(e.target.value)}
+          placeholder={pending.length ? "What should Claude do with these?" : placeholder ?? "Ask Claude to change anything…"}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }}
+          onPaste={(e) => { if (attach && e.clipboardData.files.length) { e.preventDefault(); add(e.clipboardData.files); } }}
+          className={cn("min-h-6 flex-1 resize-none bg-transparent py-1 leading-[18px] outline-none placeholder:text-faint-foreground", !attach && "pl-1.5")} />
+        {busy && onStop ? (
+          <button onClick={onStop} title="Stop" className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-foreground/10 active:scale-90"><CircleStop className="size-4" /></button>
+        ) : null}
+        <button onClick={() => void send()} disabled={(!text.trim() && !ready.length) || uploading} title={uploading ? "Uploading…" : "Send"}
+          className="grid size-7 place-items-center rounded-full bg-primary text-primary-foreground transition active:scale-90 disabled:bg-foreground/15 disabled:text-faint-foreground">
+          {uploading ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" strokeWidth={2.5} />}
+        </button>
+      </div>
     </div>
   );
 }
@@ -259,6 +319,19 @@ export function StatusDot({ status }: { status?: SessionMeta["status"] }) {
       {s === "waiting" ? "Waiting for you" : s === "running" ? "Working" : s === "failed" ? "Stopped with an error" : s === "stopped" ? "Stopped" : "Ready"}
     </span>
   );
+}
+
+/** Upload one file for this chat's next message (the server keeps it in the library). */
+export function attachFile(sid: string, file: File, onProgress: (p: number) => void): Promise<Attached> {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open("POST", `/api/chat/${encodeURIComponent(sid)}/attach`);
+    x.setRequestHeader("x-filename", encodeURIComponent(file.name));
+    x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+    x.onload = () => (x.status < 300 ? resolve(JSON.parse(x.responseText)) : reject(new Error(x.responseText || `HTTP ${x.status}`)));
+    x.onerror = () => reject(new Error("the upload stopped"));
+    x.send(file);
+  });
 }
 
 /** The chat panel: the thread and the composer, for one conversation. */
@@ -276,8 +349,8 @@ export function ChatPanel({ sid, title, edit, at, hint }: { sid: string; title?:
       </div>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 p-2.5">
         <div className="pointer-events-auto">
-          <Composer busy={busy} onStop={() => void api(`/api/chat/${sid}/stop`, { method: "POST" })}
-            onSend={(text) => api(`/api/chat/${sid}/send`, { json: { text, title, edit, at: at?.() } }).then(() => undefined)} />
+          <Composer busy={busy} onStop={() => void api(`/api/chat/${sid}/stop`, { method: "POST" })} attach={(f, onProgress) => attachFile(sid, f, onProgress)}
+            onSend={(text, files) => api(`/api/chat/${sid}/send`, { json: { text, title, edit, at: at?.(), files } }).then(() => undefined)} />
         </div>
       </div>
     </div>
