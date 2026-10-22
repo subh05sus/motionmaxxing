@@ -723,7 +723,8 @@ def check_render(edit, plan, video):
     for i, c in enumerate(cards):
         st, name = per[i], f"'{c['trigger_word']}' {c.get('src') or c['anim']['type']}"
         rec = measured.setdefault(f"{i}:{c['trigger_word']}", {})
-        bad = [(t, f) for t, f in st["cover"] if f > FACE_COVER and c.get("layout") != "scene"]   # a cut-away hides him on purpose
+        bad = [(t, f) for t, f in st["cover"] if f > FACE_COVER and c.get("layout") != "scene"
+               and c.get("layer") != "cutaway"]   # a scene or a cutaway hides him on purpose
         rec["face_cover_max"] = round(max([f for _, f in st["cover"]], default=0), 3)
         if bad:
             out.append(finding("FAIL", bad[0][0], f"{name} card is drawn over the face at {len(bad)} sample(s), "

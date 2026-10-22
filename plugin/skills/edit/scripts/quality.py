@@ -877,8 +877,9 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     d_r = np.concatenate([[1.0], np.abs(np.diff(sr_a, axis=0)).mean(axis=(1, 2))])
     d_b = np.concatenate([[1.0], np.abs(np.diff(sb_a, axis=0)).mean(axis=(1, 2))])
 
-    # freeze. Not under a full-frame scene: the footage is hidden there, so a still frame is not a dropped one
-    fz = freezes(d_r, d_b, {n for i, c in enumerate(cards) if c.get("layout") == "scene" for n in range(first[i], last[i] + 1)})
+    # freeze. Not under a full-frame scene or a cutaway: the footage is hidden there, so a still frame is not a dropped one
+    hidden = lambda c: c.get("layout") == "scene" or c.get("layer") == "cutaway"
+    fz = freezes(d_r, d_b, {n for i, c in enumerate(cards) if hidden(c) for n in range(first[i], last[i] + 1)})
     meas["freezes"] = [[round(a / fps, 2), k] for a, k in fz]
     for a, k in fz:
         out.append(F("FAIL" if k >= FREEZE_RUN else "WARN", a / fps,
@@ -887,7 +888,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
 
     # motion, the whole frame: a one-frame flash, black frames, a one-frame jump with nothing to explain it
     _, hard, jump, moves = edit_events(sr_a)
-    scenes = {n for i, c in enumerate(cards) if c.get("layout") == "scene" for n in range(first[i], last[i] + 1)}
+    scenes = {n for i, c in enumerate(cards) if hidden(c) for n in range(first[i], last[i] + 1)}
     events = set(hard + jump) | {round(t * fps) for t in cuts} | set(first) | set(last) | \
         {round(z[k] * fps) for z in plan["zooms"] for k in ("start", "end")}
     mf = motion_faults(sr_a, sb_a, scenes, {k for e in events for k in range(e - 2, e + 3)})
@@ -975,7 +976,8 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
             word, lt = scene_land(c, cwords, k_)
         elif overlay_led(c):     # started OVERLAY_LEAD_S x k before its word (plan.lay_out)
             word = scene_land(c, cwords, k_, OVERLAY_LEAD_S)[0]
-        if not others and c.get("entrance", "pop") in ENTRANCES + ("cut",):   # cut: the creator's measured hard cut
+        # a motion clip (video_card) lands its parts on its words by start_s and is gated on its own (motion.py check)
+        if not others and c.get("entrance", "pop") in ENTRANCES + ("cut",) and (c.get("anim") or {}).get("type") != "video_card":
             land, verdict = landing(st["area"], first[i], fps)
             if land is not None or scene:
                 lt = lt if scene else land / fps
@@ -1050,7 +1052,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         if ic > ICONS_PER_CARD:
             out.append(F("WARN", c["start"], f"{name} is {ic} stock icons: the icon-grid look every AI edit has",
                          "show the real thing: a logo, a capture of the product, or a photo the user gave"))
-        if i not in kept or c.get("src") or c.get("lane") == "logo":
+        if i not in kept or c.get("src") or c.get("lane") == "logo" or anim.get("type") == "video_card":   # a clip fills its box by design
             continue
         frame, bg, sp = kept[i]
         crop, bgv = panel_crop(frame, bg, boxes[i], INK_DIFF["split" if sp else "overlay"], sp)

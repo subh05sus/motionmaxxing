@@ -467,6 +467,12 @@ const VideoCard: React.FC<TP> = ({ p, w, h, look, m, fonts, dur }) => {
   const [cw, ch] = p.bare ? fitBox(p.size, w, h, 16 / 9) : fitBox(p.size, w * 0.96, h * 0.92, 16 / 9);
   const { U } = useFrame();
   const ref = useTl((timeline, q, root) => {
+    if (p.bare) {   // a motion clip in the half screen builds itself from an empty ground: it only fades, never drops or lifts
+      const el = q(".cv-in")[0];
+      timeline.fromTo(el, { opacity: 0 }, { opacity: 1, duration: 0.25, ease: "power1.inOut", immediateRender: false }, 0);
+      if (dur > 0.9) timeline.to(el, { opacity: 0, duration: 0.3, ease: "power1.inOut" }, dur - 0.3);
+      return;
+    }
     const { tl, L } = cardLife(timeline, q, root, p, m, dur, u, U);
     const tag = q(".vc-tag")[0];
     if (tag) tl.fromTo(tag, { autoAlpha: 0, y: u * 2 }, { autoAlpha: 1, y: 0, duration: 0.4, ease: m.pop }, L("in", 0.1));

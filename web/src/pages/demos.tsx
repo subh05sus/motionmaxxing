@@ -12,13 +12,14 @@ import type { PageProps } from "@/app";
 
 export interface Demo {
   id: string; title: string; url: string; show: string; formats: string; createdAt: string; updatedAt: string;
-  status: "planning" | "recording" | "finishing" | "ready" | "failed"; session?: string; seconds?: number; log: string[];
+  status: "planning" | "recording" | "recorded" | "finishing" | "ready" | "failed"; session?: string; seconds?: number; log: string[];
   media: { wide?: string; tall?: string; poster?: string };
 }
 
 export const DEMO_STATUS: Record<Demo["status"], { label: string; tone: string }> = {
   planning: { label: "Claude is planning it", tone: "text-primary" },
   recording: { label: "Recording", tone: "text-primary" },
+  recorded: { label: "Recorded, not finished", tone: "text-warning" },
   finishing: { label: "Finishing the video", tone: "text-primary" },
   ready: { label: "Ready", tone: "text-success" },
   failed: { label: "A step failed", tone: "text-warning" },

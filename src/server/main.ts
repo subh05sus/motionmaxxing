@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createReadStream, createWriteStream, existsSync, readFileSync, statSync, watch, writeFileSync, mkdirSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, readFileSync, rmSync, statSync, watch, writeFileSync, mkdirSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
@@ -457,6 +457,22 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ...s, chat: c ? { id: c.id, status: c.status } : null });
       }
       if (seg[3] === "reveal" && m === "POST") { spawn("open", [demos.demoDir(id)], { stdio: "ignore", detached: true }).unref(); return sendJson(res, 200, { ok: true }); }
+      // Finish a recording that has no video yet: render.py in the formats the brief asked for, no Claude needed
+      if (seg[3] === "finish" && m === "POST") {
+        const d = demos.demoDir(id), b = demos.brief(id), lock = path.join(d, demos.FINISH_LOCK);
+        if (!existsSync(path.join(d, "events.json"))) return sendJson(res, 409, { error: "nothing recorded yet" });
+        if (existsSync(lock)) return sendJson(res, 409, { error: "it is being finished already" });
+        writeFileSync(lock, new Date().toISOString());
+        broadcast("demo", { id });
+        const render = path.join(PLUGIN, "skills", "record", "scripts", "render.py");
+        const aspects = b.formats === "both" ? ["16:9", "9:16"] : b.formats === "tall" ? ["9:16"] : ["16:9"];
+        void (async () => {
+          for (const a of aspects) await runScript([render, d, "--aspect", a]);
+          rmSync(lock, { force: true });
+          broadcast("demo", { id });
+        })();
+        return sendJson(res, 202, { ok: true });
+      }
       if (seg[3] === "delete" && m === "POST") {
         const br = demos.brief(id);
         if (br.session) claude.stop(br.session);

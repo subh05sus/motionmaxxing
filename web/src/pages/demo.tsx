@@ -35,8 +35,12 @@ export function DemoPage({ id, setTitle, chatOpen }: PageProps & { id: string; c
           <video key={src} src={src} controls playsInline className="max-h-full max-w-full rounded-[10px] bg-black shadow-[0_20px_60px_-20px_rgba(0,0,0,0.7)]" />
         ) : (
           <div className="flex max-w-md flex-col items-center gap-3 text-center">
-            {d.status === "failed" ? null : <Loader2 className="size-6 animate-spin text-primary" />}
+            {d.status === "failed" || d.status === "recorded" ? null : <Loader2 className="size-6 animate-spin text-primary" />}
             <p className="title-2">{DEMO_STATUS[d.status].label}</p>
+            {d.status === "recorded" && (
+              <button onClick={() => void api(`/api/demos/${encodeURIComponent(id)}/finish`, { method: "POST" }).then(reload).catch((e: Error) => alert(e.message))}
+                className="h-8 rounded-full bg-primary px-4 font-medium text-primary-foreground active:scale-[0.97]">Finish the video</button>
+            )}
             <p className="label-2">{d.show}</p>
             {d.log.length > 0 && <pre className="max-w-full overflow-x-auto rounded-lg bg-foreground/6 p-2 text-left font-mono text-[11px] leading-[15px] text-muted-foreground">{d.log.join("\n")}</pre>}
           </div>

@@ -32,13 +32,23 @@ export function brief(id: string): Brief {
 
 export function saveBrief(id: string, b: Brief): void { writeFileSync(path.join(demoDir(id), "brief.json"), JSON.stringify(b, null, 1)); }
 
-/** Where it is, in plain words. */
-export function status(id: string): "planning" | "recording" | "finishing" | "ready" | "failed" {
+/** Every finished video of a recording: demo.mp4 (16:9), demo-9x16.mp4, and any other shape render.py made (demo-10x7.mp4). */
+export const videos = (d: string): string[] =>
+  existsSync(d) ? readdirSync(d).filter((f) => /^demo(-\d+x\d+)?\.mp4$/.test(f)).sort() : [];
+
+/** A finish the studio started (POST /api/demos/:id/finish) holds this until render.py is done. */
+export const FINISH_LOCK = "finishing.lock";
+
+/** Where it is, in plain words. Recorded but not finished, with no finish running, is "recorded" (a Finish button),
+ *  never a "finishing" that spins forever: a recording finished elsewhere, or by hand, has no one rendering it. */
+export function status(id: string): "planning" | "recording" | "recorded" | "finishing" | "ready" | "failed" {
   const d = demoDir(id);
-  if (existsSync(path.join(d, "demo.mp4")) || existsSync(path.join(d, "demo-9x16.mp4"))) return "ready";
+  if (videos(d).length) return "ready";
   const ev = readJson<{ ok?: boolean } | null>(path.join(d, "events.json"), null);
   if (ev && ev.ok === false) return "failed";
-  if (ev) return "finishing";
+  const lock = mtime(path.join(d, FINISH_LOCK));
+  if (lock && Date.now() - lock < 15 * 60_000) return "finishing";
+  if (ev) return Date.now() - mtime(path.join(d, "events.json")) < 120_000 ? "finishing" : "recorded";   // Claude finishes it right after
   if (existsSync(path.join(d, "run.log"))) return "recording";
   return "planning";
 }
@@ -46,16 +56,20 @@ export function status(id: string): "planning" | "recording" | "finishing" | "re
 export function summary(id: string) {
   const d = demoDir(id), b = brief(id);
   const url = (f: string) => (existsSync(path.join(d, f)) ? `/library-file/recordings/${encodeURIComponent(id)}/${f}?v=${Math.round(mtime(path.join(d, f)))}` : undefined);
+  const all = videos(d);
   const info = readJson<{ duration?: number }>(path.join(d, "demo.json"), {});
   const tall = readJson<{ duration?: number }>(path.join(d, "demo-9x16.json"), {});
+  const other = all.find((f) => f !== "demo.mp4" && f !== "demo-9x16.mp4");
+  const otherInfo = other ? readJson<{ duration?: number }>(path.join(d, other.replace(/\.mp4$/, ".json")), {}) : {};
   const updated = Math.max(...["brief.json", "shots.json", "run.log", "events.json", "demo.mp4", "demo-9x16.mp4"].map((f) => mtime(path.join(d, f))));
   let log: string[] = [];
   try { log = readFileSync(path.join(d, "run.log"), "utf8").trim().split("\n").slice(-3); } catch { /* not recording yet */ }
   return {
     id, title: b.title, url: b.url, show: b.show, formats: b.formats, createdAt: b.createdAt,
     updatedAt: new Date(updated || Date.parse(b.createdAt)).toISOString(), status: status(id), session: b.session,
-    seconds: info.duration ?? tall.duration, log,
-    media: { wide: url("demo.mp4"), tall: url("demo-9x16.mp4"), poster: url("demo.jpg") ?? url("demo-9x16.jpg") ?? url("look.png") },
+    seconds: info.duration ?? tall.duration ?? otherInfo.duration, log,
+    media: { wide: url("demo.mp4") ?? (other ? url(other) : undefined), tall: url("demo-9x16.mp4"),
+             poster: url("demo.jpg") ?? url("demo-9x16.jpg") ?? url("look.png") },
   };
 }
 
