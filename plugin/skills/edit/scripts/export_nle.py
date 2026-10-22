@@ -11,6 +11,8 @@
   NAME.xml        FCP7 XML (xmeml 4): Premiere Pro (File > Import); Resolve reads it too
   NAME.edl        CMX3600, the cut only (one video track, no cards, no captions)
   CAPCUT.md       CapCut has no timeline import: the steps, every card's time and place
+  HANDOFF.md      for an editor taking it over: what every file is, the fonts, colours, credits, and the
+                  finished render.mp4 and the cut.mp4 beside it (hard links: no second copy on the disk)
   media/          card-NN.png (a plain capture fitted to its box), card-NN.mov (a card that moves:
                   rendered by the plugin's Remotion on a transparent ground, cropped to its box,
                   ProRes 4444 with alpha), sfx-NN.wav (sound cues, level baked in)
@@ -41,7 +43,7 @@ import xml.etree.ElementTree as ET
 from fractions import Fraction
 from pathlib import Path
 
-FORMATS = ("fcpxml", "premiere", "resolve", "capcut", "edl", "srt")
+FORMATS = ("fcpxml", "premiere", "resolve", "capcut", "edl", "srt", "handoff")
 TITLE_UID = ".../Titles.localized/Bumper:Opener.localized/Basic Title.localized/Basic Title.moti"
 LEAD_S, TAIL_S = 0.3, 0.4   # an animated card is rendered from a little before to a little after its slot
 
@@ -598,8 +600,74 @@ def export(ctx, out, todo, render):
     if "capcut" in todo:
         written.append(out / "CAPCUT.md")
         written[-1].write_text(capcut(ctx, cards, sfx), encoding="utf-8")
+    if "handoff" in todo:
+        written += handoff(ctx, out, cards, sfx, [p.name for p in written])
     missing = [c for c in cards if c["kind"] == "missing"]
     return written, cards, sfx, missing
+
+
+def link_or_copy(src, dst):
+    """A hard link when the disk allows it (no second copy), else a copy."""
+    import os
+    dst.unlink(missing_ok=True)
+    try:
+        os.link(src, dst)
+    except OSError:
+        shutil.copy2(src, dst)
+    return dst
+
+
+def handoff(ctx, out, cards, sfx, files):
+    """HANDOFF.md and the videos beside it: everything an editor needs to take the edit over by hand."""
+    edit, plan = ctx["edit"], ctx["plan"]
+    style = (plan.get("captions") or {}).get("style") or {}
+    made = []
+    for name in ("render.mp4", "cut.mp4"):
+        if (edit / name).exists():
+            made.append(link_or_copy(edit / name, out / name))
+    credits = edit / "credits.txt"
+    if (edit / "credits.json").exists() and not credits.exists():
+        try:
+            cs = json.loads((edit / "credits.json").read_text(encoding="utf-8"))
+            credits.write_text("\n".join(f"{c.get('title') or c.get('file')}: {c.get('author') or '?'}, {c.get('licence')}, {c.get('url')}"
+                                          for c in cs) + "\n", encoding="utf-8")
+        except (OSError, ValueError):
+            pass
+    if credits.exists():
+        made.append(link_or_copy(credits, out / "credits.txt"))
+    W, H, fps = plan["width"], plan["height"], plan.get("fps", 30)
+    font = style.get("font_match") or "the default caption font"
+    rows = [f"| {c['i']} | {Path(c['path']).name if c.get('path') else '(not exported)'} | {c['start_f'] / ctx['fps']:.2f} | "
+            f"{(c['start_f'] + c['len_f']) / ctx['fps']:.2f} | {c.get('name', '')} |" for c in cards]
+    md = "\n".join([
+        f"# {ctx['name']}: handoff", "",
+        f"{W}x{H}, {fps} fps, {plan['durationInFrames'] / fps:.1f} s. Everything is on the cut's clock (0 = the first frame of cut.mp4).", "",
+        "## Files", "",
+        "| file | what |", "|---|---|",
+        "| `render.mp4` | the finished edit as rendered here |",
+        "| `cut.mp4` | the jump cut alone: no captions, no visuals, no sound cues |",
+        f"| `{ctx['name']}.fcpxml` | Final Cut Pro 10.6+ and DaVinci Resolve 18+ (File > Import > Timeline) |" if "fcpxml" in " ".join(files) else "",
+        f"| `{ctx['name']}.xml` | Premiere Pro (File > Import) |" if f"{ctx['name']}.xml" in files else "",
+        f"| `{ctx['name']}.edl` | the cut only, CMX3600 |" if f"{ctx['name']}.edl" in files else "",
+        f"| `{ctx['name']}.srt` | the captions |",
+        "| `CAPCUT.md` | the steps to rebuild it in CapCut |" if "CAPCUT.md" in files else "",
+        "| `media/` | every visual (card-NN.png or a moving card-NN.mov with alpha) and sound cue (sfx-NN.wav, level set) |",
+        "| `credits.txt` | stock and quoted material: author, licence, link |" if credits.exists() else "", "",
+        "The timelines trim the original raw take, so every cut can be opened up again: "
+        f"`{ctx['source']}`.", "",
+        "## Look", "",
+        f"- Captions: {font}, weight {style.get('weight', '?')}, {style.get('words_per_caption') or style.get('words', '?')} word(s) a page, "
+        f"{style.get('size_pct', '?')}% of the long side, {style.get('color') or style.get('fill') or '#FFFFFF'}, "
+        f"{style.get('y_pct', '?')}% down." + (f" Free at fonts.google.com/specimen/{font.replace(' ', '+')}." if style.get("font_match") else ""),
+        f"- Zooms: {len(plan.get('zooms') or [])}, not in the timelines (re-create by eye from render.mp4).",
+        f"- Music: {'a bed under the voice (in render.mp4)' if plan.get('music') else 'none'}; sound cues: {len(sfx)}.", "",
+        "## Visuals, in order", "",
+        "| card | file | start s | end s | word |", "|---|---|---|---|---|", *rows, ""])
+    lines = md.split("\n")
+    # a format not exported leaves an empty line inside the files table: drop those, keep the paragraph breaks
+    keep = [l for i, l in enumerate(lines) if l or not (0 < i < len(lines) - 1 and lines[i - 1].startswith("|") and lines[i + 1].startswith("|"))]
+    (out / "HANDOFF.md").write_text("\n".join(keep), encoding="utf-8")
+    return [out / "HANDOFF.md", *made]
 
 
 # ---------- demo ----------
@@ -677,7 +745,7 @@ def main():
         return demo()
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("edit")
-    ap.add_argument("--to", required=True, help="fcpxml, premiere, resolve, capcut, edl, srt, all; or a comma list")
+    ap.add_argument("--to", required=True, help="fcpxml, premiere, resolve, capcut, edl, srt, handoff, all; or a comma list")
     ap.add_argument("--plan", default="plan.json")
     ap.add_argument("--source", help="the raw take, when report.json's path moved")
     ap.add_argument("--no-render", action="store_true", help="skip rendering animated cards (they become markers only)")

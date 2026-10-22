@@ -65,8 +65,9 @@ export function needsPermission(tool: string, input: Record<string, unknown>, bl
   if (tool === "Bash") {
     const cmd = String(input.command ?? "");
     if (OUTWARD.test(cmd)) return "reaches outside this Mac, or deletes broadly";
-    const abs = cmd.match(/(?:^|[\s'"=])(\/(?:Users|home|etc|var|opt|Applications|System|Volumes)[^\s'"]*)/g) ?? [];
-    const outside = abs.map((a) => a.replace(/^[\s'"=]/, "")).find((a) => !inside(a) && !/^\/(usr|bin|opt\/homebrew)\//.test(a));
+    // absolute paths in the command, without the shell punctuation that can follow one ("cd /a/b; ls", "(cd /a && x)")
+    const abs = cmd.match(/(?:^|[\s'"=(])(\/(?:Users|home|etc|var|opt|Applications|System|Volumes)[^\s'"`;|&()<>]*)/g) ?? [];
+    const outside = abs.map((a) => a.replace(/^[\s'"=(]/, "").replace(/[.,:]+$/, "")).find((a) => !inside(a) && !/^\/(usr|bin|opt\/homebrew)\//.test(a));
     return outside ? `touches ${outside}, outside the studio's folders` : null;
   }
   return null;
@@ -178,7 +179,7 @@ export class Claude {
     const resolve = l?.pending.get(eventId);
     if (!s || !e || e.k !== "permission" || !resolve) throw new Error("that request is no longer waiting");
     e.status = allow ? "allowed" : "denied"; this.emit(s, e);
-    if (allow && always) l!.allowAlways.add(e.tool);
+    if (allow && always) l!.allowAlways.add(`${e.tool}\n${e.reason}`);   // the same kind of request, never the whole tool
     l!.pending.delete(eventId);
     resolve(allow ? { behavior: "allow" } : { behavior: "deny", message: "The user declined this in the studio. Find another way, or ask them." });
     this.setStatus(s, "running");
@@ -213,7 +214,8 @@ export class Claude {
         this.setStatus(s, "waiting");
         return new Promise((resolve) => live.pending.set(ev.id, resolve as (v: unknown) => void));
       }
-      const reason = live.allowAlways.has(name) ? null : needsPermission(name, input, o.blockedPath);
+      const why = needsPermission(name, input, o.blockedPath);
+      const reason = why && live.allowAlways.has(`${name}\n${why}`) ? null : why;
       if (!reason) return { behavior: "allow", updatedInput: input };
       const ev = this.push(s, { k: "permission", tool: name, detail: trim(name === "Bash" ? String(input.command ?? "") : JSON.stringify(input), 600), reason, status: "waiting" });
       this.setStatus(s, "waiting");

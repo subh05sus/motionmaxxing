@@ -12,6 +12,11 @@ describe("what Claude may do without asking", () => {
     expect(needsPermission("Bash", { command: `python3 ${REPO}/plugin/skills/cut/scripts/render.py src edits/a` })).toBeNull();
     expect(needsPermission("AskUserQuestion", {})).toBeNull();
   });
+  it("reads a path the way the shell does", () => {
+    expect(needsPermission("Bash", { command: `cd ${LIBRARY}; ls -la edits/a` })).toBeNull();
+    expect(needsPermission("Bash", { command: `(cd ${LIBRARY} && python3 x.py)` })).toBeNull();
+    expect(needsPermission("Bash", { command: `cd ${path.join(os.homedir(), "Documents")}; ls` })).toMatch(/outside/);
+  });
   it("asks for writes outside the studio's folders", () => {
     expect(needsPermission("Write", { file_path: path.join(os.homedir(), "Documents", "x.txt") })).toMatch(/outside/);
   });

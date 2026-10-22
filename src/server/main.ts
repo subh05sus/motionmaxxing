@@ -310,6 +310,20 @@ const server = http.createServer(async (req, res) => {
         broadcast("video", { id });
         return sendJson(res, 200, lib.summary(id));
       }
+      if (action === "export" && m === "POST") {
+        // Final Cut, Premiere, Resolve, EDL, SRT, the CapCut steps and the handoff, all at once, no Claude needed.
+        if (jobs.has(id)) return sendJson(res, 409, { error: "something is running on this video; try again in a moment" });
+        if (!existsSync(path.join(lib.editDir(id), "plan.json"))) return sendJson(res, 400, { error: "make the edit first" });
+        jobs.set(id, { name: "export", startedAt: new Date().toISOString() });
+        step(id, "Exporting for Final Cut, Premiere, Resolve and CapCut");
+        void runScript([path.join(PLUGIN, "skills", "edit", "scripts", "export_nle.py"), lib.editDir(id), "--to", "all"])
+          .then((r) => {
+            if (r.code) step(id, "The export stopped", { failed: r.err.trim().split("\n").slice(-1)[0] });
+            else { step(id, "Exported", { done: true, progress: 1 }); spawn("open", [path.join(lib.editDir(id), "export")], { stdio: "ignore", detached: true }).unref(); }
+          })
+          .finally(() => { jobs.delete(id); broadcast("video", { id }); });
+        return sendJson(res, 202, { ok: true });
+      }
       if (action === "trash" && m === "POST") {
         const r = lib.record(id);
         if (jobs.has(id)) return sendJson(res, 409, { error: "it is being rebuilt; try again in a moment" });

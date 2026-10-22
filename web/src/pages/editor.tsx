@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "motion/react";
-import { Check, Info, Loader2, MessageSquare, Pause, Play, Scissors, Send, StickyNote, Trash2, Undo2 } from "lucide-react";
+import { Check, Info, Loader2, MessageSquare, Pause, Play, Scissors, Send, Share, StickyNote, Trash2, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChatPanel, StatusDot } from "@/components/chat";
 import { GlassSegmented } from "@/components/ui/glass-segmented";
@@ -292,6 +292,12 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
         {v.status === "new" && !v.chat && <Link href={`/new?video=${encodeURIComponent(id)}`} className="flex h-7 items-center rounded-md bg-primary px-3 font-medium text-primary-foreground active:scale-[0.97]">Make the cut</Link>}
         {hasCut && v.status === "ready" && (
           <button disabled={approving} onClick={() => approve("cut")} title="Approve the cut, and Claude makes the edit on top" className="flex h-7 items-center gap-1 rounded-md bg-primary px-3 font-medium text-primary-foreground active:scale-[0.97]"><Check className="size-3.5" />{wide ? "Approve the cut" : "Approve"}</button>
+        )}
+        {hasEdit && (
+          <button disabled={!!v.job} onClick={() => void api(`/api/videos/${encodeURIComponent(id)}/export`, { method: "POST" }).then(reload).catch((e: Error) => alert(e.message))}
+            title="Final Cut, Premiere, Resolve, CapCut and a folder for an editor" className="flex h-7 items-center gap-1.5 rounded-md px-2.5 hover:bg-foreground/8 disabled:opacity-40">
+            <Share className="size-3.5" />{wide ? "Export" : ""}
+          </button>
         )}
         {hasEdit && v.status === "editing" && (
           <button disabled={approving} onClick={() => approve("edit")} className="flex h-7 items-center gap-1 rounded-md bg-primary px-3 font-medium text-primary-foreground active:scale-[0.97]"><Check className="size-3.5" />{wide ? "Approve the edit" : "Approve"}</button>

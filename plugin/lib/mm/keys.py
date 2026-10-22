@@ -40,6 +40,8 @@ NAMES = {"pexels": "Pexels", "pixabay": "Pixabay"}
 def get(name):
     """(key, where it came from) or (None, None). `name` is pexels or pixabay.
     Never a .env in the working folder: that is another project's, and its key would be billed."""
+    if name not in VARS:   # a service this editor does not use (no paid APIs): never a key
+        return None, None
     var, p = VARS[name], key_file()
     if os.environ.get(var, "").strip():
         return os.environ[var].strip(), f"the {var} variable"
