@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "motion/react";
-import { Film, House, Library, Moon, Palette as PaletteIcon, Plus, Search, Settings, Wrench } from "lucide-react";
+import { Film, House, Library, MonitorPlay, Moon, Palette as PaletteIcon, Plus, Search, Settings, Wrench } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { navigate } from "@/lib/router";
@@ -31,6 +31,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
       { id: "new", label: "New video", hint: "Drop a raw take", icon: Plus, run: go("/new") },
       { id: "home", label: "Home", icon: House, run: go("/") },
       { id: "videos", label: "Videos", icon: Film, run: go("/videos") },
+      { id: "demos", label: "Demos", hint: "Claude records a site", icon: MonitorPlay, run: go("/demos") },
       { id: "styles", label: "Styles", icon: PaletteIcon, run: go("/styles") },
       { id: "library", label: "Library", icon: Library, run: go("/library") },
       { id: "settings", label: "Settings", icon: Settings, run: go("/settings") },
@@ -39,7 +40,10 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
       ...videos.map((v) => ({ id: `v:${v.id}`, label: v.title, hint: v.status, icon: Film, run: go(`/videos/${encodeURIComponent(v.id)}`) })),
     ];
     const s = q.trim().toLowerCase();
-    return s ? all.filter((x) => x.label.toLowerCase().includes(s) || x.hint?.toLowerCase().includes(s)) : all;
+    if (!s) return all;
+    // A match in the name beats one in the hint; a name that starts with it beats one that contains it.
+    const rank = (x: Item) => { const l = x.label.toLowerCase(); return l.startsWith(s) ? 0 : l.includes(s) ? 1 : x.hint?.toLowerCase().includes(s) ? 2 : 3; };
+    return all.filter((x) => rank(x) < 3).sort((a, b) => rank(a) - rank(b));
   }, [q, videos, onClose]);
   useEffect(() => { setI(0); }, [q]);
   return (

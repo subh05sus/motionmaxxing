@@ -1,4 +1,4 @@
-import { Bell, Check, KeyRound, Loader2, Moon, Sparkles, Wrench } from "lucide-react";
+import { Bell, Check, Globe, KeyRound, Loader2, Moon, Sparkles, Wrench, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { GlassSegmented } from "@/components/ui/glass-segmented";
 import { Switch } from "@/components/ui/switch";
@@ -62,6 +62,40 @@ function KeyRow({ name, has, reload }: { name: keyof typeof STOCK; has: boolean;
   );
 }
 
+/** The recording browser: the sites Claude may drive for demos, and signing in to one (in that browser, never the user's own). */
+function RecorderGroup() {
+  const sites = useApi<Record<string, { allowed: string }>>("/api/recorder/sites");
+  const [url, setUrl] = useState("");
+  const [msg, setMsg] = useState<string>();
+  const open = async () => {
+    setMsg(undefined);
+    try { await api("/api/recorder/login", { json: { url } }); setMsg("The recording browser is opening. Sign in there, then close its window."); setUrl(""); sites.reload(); }
+    catch (e) { setMsg((e as Error).message); }
+  };
+  const list = Object.entries(sites.data ?? {});
+  return (
+    <Group title="Recording browser" footer="Claude records demos in its own Chrome window with its own sign-ins. Your Chrome, its cookies and accounts are never used.">
+      {list.map(([h]) => (
+        <div key={h} className="flex min-h-9 items-center gap-3 px-3">
+          <span className="grid size-6 shrink-0 place-items-center rounded-[6px] bg-foreground/8 text-muted-foreground"><Globe className="size-3.5" /></span>
+          <span className="flex-1">{h}</span>
+          <span className="caption">allowed</span>
+          <button title="Ask again next time" onClick={async () => { await api(`/api/recorder/sites/${encodeURIComponent(h)}`, { method: "DELETE" }); sites.reload(); }} className="grid size-6 place-items-center rounded-md text-faint-foreground hover:bg-foreground/8 hover:text-foreground"><X className="size-3.5" /></button>
+        </div>
+      ))}
+      <div className="space-y-1.5 px-3 py-2.5">
+        <p>Sign in to a site</p>
+        <div className="flex gap-1.5">
+          <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && url.trim()) void open(); }} placeholder="claude.ai"
+            className="h-7 flex-1 rounded-md bg-input px-2 outline-none focus:ring-2 focus:ring-primary/40" />
+          <button disabled={!url.trim()} onClick={open} className="h-7 rounded-md bg-foreground/10 px-3 font-medium hover:bg-foreground/15 active:scale-[0.97] disabled:opacity-40">Open</button>
+        </div>
+        {msg && <p className="caption">{msg}</p>}
+      </div>
+    </Group>
+  );
+}
+
 export function SettingsPage({ setTitle }: PageProps) {
   const keys = useApi<Record<string, boolean>>("/api/keys");
   const state = useApi<{ library: string; home: string; version: string }>("/api/state");
@@ -89,6 +123,7 @@ export function SettingsPage({ setTitle }: PageProps) {
         <Group title="Stock footage" footer="Wikimedia Commons needs no key. Keys never go into the chat.">
           {(["pexels", "pixabay"] as const).map((n) => <KeyRow key={n} name={n} has={!!keys.data?.[n]} reload={keys.reload} />)}
         </Group>
+        <RecorderGroup />
         <Group title="Claude">
           <Row icon={<Sparkles className="size-3.5" />} label="Your Claude login" sub="The studio runs Claude Code on this Mac with your own Claude plan. No API key, nothing billed separately." />
         </Group>

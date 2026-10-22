@@ -31,7 +31,7 @@ let source: EventSource | null = null;
 function connect(): void {
   if (source) return;
   source = new EventSource("/api/events");
-  for (const t of ["video", "session", "setup", "hello"]) source.addEventListener(t, (e) => {
+  for (const t of ["video", "demo", "session", "setup", "hello"]) source.addEventListener(t, (e) => {
     const data = JSON.parse((e as MessageEvent).data || "{}");
     for (const h of handlers) h(t, data);
   });

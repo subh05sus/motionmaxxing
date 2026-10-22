@@ -11,6 +11,7 @@ export const HOME = process.env.MM_HOME || path.join(os.homedir(), ".motionmaxxi
 export const LIBRARY = process.env.MM_LIBRARY || path.join(os.homedir(), "Movies", "motionmaxxing");
 export const EDITS = path.join(LIBRARY, "edits");
 export const VIDEOS = path.join(LIBRARY, "videos");
+export const RECORDINGS = path.join(LIBRARY, "recordings");
 export const SESSIONS = path.join(HOME, "studio", "sessions");
 export const VPY = path.join(HOME, "venv", "bin", "python");
 export const PORT = Number(process.env.MM_PORT || 5199);
@@ -19,7 +20,7 @@ export const CUT = path.join(PLUGIN, "skills", "cut", "scripts");
 export const SETUP = path.join(PLUGIN, "skills", "setup", "scripts", "setup.py");
 
 export function ensureDirs(): void {
-  for (const d of [EDITS, VIDEOS, SESSIONS]) if (!existsSync(d)) mkdirSync(d, { recursive: true });
+  for (const d of [EDITS, VIDEOS, RECORDINGS, SESSIONS]) if (!existsSync(d)) mkdirSync(d, { recursive: true });
 }
 
 /** The engine's Python when setup has made it, else the system one (stdlib scripts run on either). */

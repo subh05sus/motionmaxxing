@@ -40,6 +40,9 @@ The studio:
 - **The editor**: the video in the middle, the transcript on the left with every cut word struck through (select
   words to cut them or bring them back), Claude, your notes and the facts on the right, the timeline below. Notes are
   pinned to a moment and go to Claude together. Claude's questions show up as cards.
+- **Demos**: a site and a sentence ("ask Claude for a meal plan and show the answer arriving"). Claude drives the
+  site in its own browser and records it; the waiting plays fast, the camera follows each click, personal data is
+  blurred. Wide and vertical.
 - **Styles**, **Library**, **Settings**. ⌘K finds anything, ⌘B folds the sidebar, ⌘/ shows or hides Claude.
 - On a phone: watch, leave notes and approve.
 

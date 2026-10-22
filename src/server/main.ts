@@ -4,8 +4,9 @@ import http from "node:http";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { Claude, type Ev, type SessionMeta } from "./claude.js";
+import * as demos from "./demos.js";
 import * as lib from "./library.js";
-import { CUT, EDITS, HOME, LIBRARY, PLUGIN, PORT, SETUP, VIDEOS, WEB_DIST, ensureDirs, python, slug } from "./paths.js";
+import { CUT, EDITS, HOME, LIBRARY, PLUGIN, PORT, RECORDINGS, SETUP, VIDEOS, WEB_DIST, ensureDirs, python, slug } from "./paths.js";
 
 /**
  * The studio's server: the page (web/dist), its API, live events, the library's media, and Claude behind it. Local only:
@@ -325,6 +326,63 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/chats") return sendJson(res, 200, claude.list());
 
+    // Demo recordings: Claude drives a site in its own browser, the record skill finishes the video.
+    if (p === "/api/demos" && m === "GET") return sendJson(res, 200, demos.list());
+    if (p === "/api/demos" && m === "POST") {
+      const b = await body(req);
+      let url = String(b.url ?? "").trim();
+      if (url && !/^https?:\/\//.test(url)) url = "https://" + url;
+      try { new URL(url); } catch { return sendJson(res, 400, { error: "that is not a web address" }); }
+      const show = String(b.show ?? "").trim();
+      if (!show) return sendJson(res, 400, { error: "say what the demo should show" });
+      const formats = ["wide", "tall", "both"].includes(b.formats) ? b.formats : "both";
+      // the title: the first sentence ("J.A.R.V.I.S." is not one), cut at a word
+      const first = show.split(/[.!?](?=\s|$)|\n/)[0]!.trim();
+      const title = String(b.title ?? "").trim() || (first.length > 60 ? first.slice(0, 60).replace(/\s+\S*$/, "") + "…" : first);
+      const id = demos.newDemo({ title, url, show, formats });
+      const sid = `d_${id}`;
+      const br = demos.brief(id); br.session = sid; demos.saveBrief(id, br);
+      claude.ensure(sid, br.title, demos.demoDir(id));
+      claude.send(sid, `Record a demo of ${url}: ${show}`, demos.prompt(id));
+      broadcast("demo", { id });
+      return sendJson(res, 201, { id, session: sid });
+    }
+    if (seg[0] === "api" && seg[1] === "demos" && seg[2]) {
+      const id = seg[2];
+      if (!existsSync(demos.demoDir(id))) return sendJson(res, 404, { error: "no such demo" });
+      if (!seg[3] && m === "GET") {
+        const s = demos.summary(id), c = s.session ? claude.get(s.session) : undefined;
+        return sendJson(res, 200, { ...s, chat: c ? { id: c.id, status: c.status } : null });
+      }
+      if (seg[3] === "reveal" && m === "POST") { spawn("open", [demos.demoDir(id)], { stdio: "ignore", detached: true }).unref(); return sendJson(res, 200, { ok: true }); }
+    }
+    if (p === "/api/recorder/sites" && m === "GET") {
+      try { return sendJson(res, 200, JSON.parse(readFileSync(path.join(HOME, "recorder", "sites.json"), "utf8"))); } catch { return sendJson(res, 200, {}); }
+    }
+    if (seg[0] === "api" && seg[1] === "recorder" && seg[2] === "sites" && seg[3] && m === "DELETE") {
+      const f = path.join(HOME, "recorder", "sites.json");
+      let sites: Record<string, unknown> = {};
+      try { sites = JSON.parse(readFileSync(f, "utf8")); } catch { /* none */ }
+      delete sites[seg[3]];
+      mkdirSync(path.dirname(f), { recursive: true });
+      writeFileSync(f, JSON.stringify(sites, null, 1));
+      return sendJson(res, 200, sites);
+    }
+    if (p === "/api/recorder/login" && m === "POST") {
+      const b = await body(req);
+      let url = String(b.url ?? "").trim();
+      if (url && !/^https?:\/\//.test(url)) url = "https://" + url;
+      try { new URL(url); } catch { return sendJson(res, 400, { error: "that is not a web address" }); }
+      // The user opens the recording browser to sign in themselves: their own action, so the site counts as allowed.
+      const h = new URL(url).hostname.replace(/^www\./, "");
+      const f = path.join(HOME, "recorder", "sites.json");
+      let sites: Record<string, unknown> = {};
+      try { sites = JSON.parse(readFileSync(f, "utf8")); } catch { /* none */ }
+      if (!sites[h]) { sites[h] = { allowed: new Date().toISOString(), by: "sign-in" }; mkdirSync(path.dirname(f), { recursive: true }); writeFileSync(f, JSON.stringify(sites, null, 1)); }
+      spawn(process.execPath, [demos.RECORDER, "login", url], { stdio: "ignore", detached: true, env: process.env }).unref();
+      return sendJson(res, 200, { ok: true });
+    }
+
     if (seg[0] === "media" && seg[1] && seg[2]) {
       const id = seg[1], name = seg[2], d = lib.editDir(id);
       if (name === "__poster") { const f = await lib.poster(id); return f ? sendFile(req, res, f) : void res.writeHead(404).end(); }
@@ -404,6 +462,13 @@ try {
     if (!id || id.startsWith(".")) return;
     clearTimeout(pending.get(id));
     pending.set(id, setTimeout(() => broadcast("video", { id }), 250));
+  });
+  const pendingDemo = new Map<string, NodeJS.Timeout>();
+  watch(RECORDINGS, { recursive: true }, (_ev, f) => {
+    const id = String(f ?? "").split(path.sep)[0];
+    if (!id || id.startsWith(".") || String(f).includes(`${path.sep}frames${path.sep}`)) return;
+    clearTimeout(pendingDemo.get(id));
+    pendingDemo.set(id, setTimeout(() => broadcast("demo", { id }), 300));
   });
   const prog = path.join(HOME, "progress");
   mkdirSync(prog, { recursive: true });
