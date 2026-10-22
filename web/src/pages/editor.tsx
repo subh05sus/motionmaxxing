@@ -13,10 +13,27 @@ import type { PageProps } from "@/app";
 
 interface Word { i: number; text: string; start: number; end: number; kept: boolean; kind?: string }
 interface Note { id: string; t: number; text: string; stage: string; at: string; sent?: string }
+interface PlanSummary {
+  width: number; height: number; duration: number;
+  cards: { start: number; end: number; label: string; kind: string; place: "scene" | "split" | "box" | "behind" }[];
+  captions: { start: number; end: number; text: string }[];
+  zooms: { start: number; end: number; scale: number }[];
+  sounds: { t: number; name: string }[];
+  music: boolean;
+}
 interface Detail extends VideoSummary {
   transcript: { words: Word[]; cuts: { start: number; end: number; kind: string; note?: string }[]; kept: { start: number; end: number }[]; lang?: string };
+  plan: PlanSummary | null;
   notes: Note[]; job: { name: string } | null; chat: { id: string; status: string } | null;
 }
+
+/** Where a visual sits, as a colour on the timeline. */
+const PLACE: Record<PlanSummary["cards"][number]["place"], { label: string; cls: string }> = {
+  scene: { label: "Full screen", cls: "bg-[#bf5af2]/70" },
+  split: { label: "Half the screen", cls: "bg-[#64d2ff]/65" },
+  box: { label: "Small box", cls: "bg-[#30d158]/60" },
+  behind: { label: "Behind you", cls: "bg-[#ff9f0a]/70" },
+};
 
 const KIND: Record<string, string> = { retake: "Retake", false_start: "False start", filler: "Filler", meta: "Talking to yourself", audio_event: "Sound", redundant: "Said again", alt_hook: "Other hook", manual: "Your cut", silence: "Pause" };
 
@@ -138,15 +155,26 @@ function Transcript({ words, now, onSeek, onEdit, busy }: { words: Word[]; now: 
   );
 }
 
-function Timeline({ spans, total, now, notes, onSeek }: { spans: { start: number; end: number }[]; total: number; now: number; notes: Note[]; onSeek: (t: number) => void }) {
+function Timeline({ spans, total, now, notes, onSeek, plan }: { spans: { start: number; end: number }[]; total: number; now: number; notes: Note[]; onSeek: (t: number) => void; plan?: PlanSummary | null }) {
   const bar = useRef<HTMLDivElement>(null);
   const pct = (t: number) => `${Math.max(0, Math.min(100, (t / (total || 1)) * 100))}%`;
   const seek = (e: React.MouseEvent) => { const r = bar.current!.getBoundingClientRect(); onSeek(((e.clientX - r.left) / r.width) * total); };
+  const block = (a: number, b: number) => ({ left: pct(a), width: `calc(${pct(Math.max(0.05, b - a))} - 1px)` });
   const tracks: [string, ReactNode][] = [
-    ["Video", spans.map((s, i) => <div key={i} className={cn("absolute top-1 bottom-1 rounded-[4px]", i % 2 ? "bg-primary/45" : "bg-primary/60")} style={{ left: pct(s.start), width: `calc(${pct(s.end - s.start)} - 1px)` }} />)],
-    ["Motion", <span key="m" className="absolute inset-0 flex items-center pl-2 caption">Motion graphics come with the edit</span>],
-    ["Captions", <span key="c" className="absolute inset-0 flex items-center pl-2 caption">Captions come with the edit</span>],
-    ["Sound", <span key="s" className="absolute inset-0 flex items-center pl-2 caption">Music and sound cues come with the edit</span>],
+    ["Video", <>
+      {spans.map((s, i) => <div key={i} className={cn("absolute top-1 bottom-1 rounded-[4px]", i % 2 ? "bg-primary/45" : "bg-primary/60")} style={block(s.start, s.end)} />)}
+      {plan?.zooms.map((z, i) => <div key={`z${i}`} title={`Zoom ×${z.scale}`} className="absolute bottom-0.5 h-1 rounded-full bg-white/70" style={block(z.start, z.end)} />)}
+    </>],
+    ["Visuals", plan ? plan.cards.map((c, i) => (
+      <div key={i} title={`${c.label} · ${PLACE[c.place].label}`} className={cn("absolute top-1 bottom-1 overflow-hidden rounded-[4px] px-1 text-[10px] leading-[18px] text-white", PLACE[c.place].cls)} style={block(c.start, c.end)}>{c.label}</div>
+    )) : <span className="absolute inset-0 flex items-center pl-2 caption">The visuals come with the edit</span>],
+    ["Captions", plan ? plan.captions.map((c, i) => (
+      <div key={i} title={c.text} className="absolute top-1.5 bottom-1.5 overflow-hidden rounded-[3px] bg-foreground/15 px-0.5 text-[9px] leading-[14px] text-muted-foreground" style={block(c.start, c.end)}>{c.text}</div>
+    )) : <span className="absolute inset-0 flex items-center pl-2 caption">Captions come with the edit</span>],
+    ["Sound", plan ? <>
+      {plan.music && <div className="absolute top-2.5 bottom-2.5 left-0 right-0 rounded-full bg-[#ff375f]/30" title="Music" />}
+      {plan.sounds.map((x, i) => <span key={i} title={x.name} className="absolute top-1.5 h-4 w-[3px] -translate-x-1/2 rounded-full bg-[#ff375f]" style={{ left: pct(x.t) }} />)}
+    </> : <span className="absolute inset-0 flex items-center pl-2 caption">Music and sound cues come with the edit</span>],
   ];
   return (
     <div className="flex h-full select-none">
@@ -222,32 +250,40 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
   const { data: v, reload } = useApi<Detail>(`/api/videos/${encodeURIComponent(id)}`, [id]);
   useEvents((t, d) => { if (t === "video" && d?.id === id) reload(); });
   const player = useRef<HTMLVideoElement>(null);
-  const [view, setView] = useState<"cut" | "raw">("cut");
+  const [view, setView] = useState<"edit" | "cut" | "raw">("edit");
   const [tab, setTab] = useState<"claude" | "notes" | "info">("claude");
   const [now, setNow] = useState(0);
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
   const maps = useMemo(() => timeMaps(v?.transcript.kept ?? []), [v?.transcript.kept]);
   const hasCut = !!v?.media.cut;
-  const showing = view === "cut" && hasCut ? "cut" : "raw";
-  const src = showing === "cut" ? v?.media.cut : v?.media.source;
-  const nowSrc = showing === "cut" ? maps.toSrc(now) : now;
+  const hasEdit = !!v?.media.render;
+  // The edit runs on the cut's clock, so everything that maps cut time works for it too.
+  const showing: "edit" | "cut" | "raw" = view === "edit" && hasEdit ? "edit" : (view === "cut" || view === "edit") && hasCut ? "cut" : "raw";
+  const onCut = showing !== "raw";
+  const src = showing === "edit" ? v?.media.render : showing === "cut" ? v?.media.cut : v?.media.source;
+  const viewOptions = [...(hasEdit ? [{ value: "edit" as const, label: "Edit" }] : []), { value: "cut" as const, label: "Cut" }, { value: "raw" as const, label: "Raw" }];
+  const nowSrc = onCut ? maps.toSrc(now) : now;
   const onTime = useCallback((t: number) => setNow(t), []);
-  const seekSrc = (t: number) => { const p = player.current; if (p) { p.currentTime = showing === "cut" ? maps.toCut(t) : t; void p.play(); } };
-  const seekCut = (t: number) => { const p = player.current; if (p) p.currentTime = showing === "cut" ? t : maps.toSrc(t); };
+  const seekSrc = (t: number) => { const p = player.current; if (p) { p.currentTime = onCut ? maps.toCut(t) : t; void p.play(); } };
+  const seekCut = (t: number) => { const p = player.current; if (p) p.currentTime = onCut ? t : maps.toSrc(t); };
   const edit = async (kind: "cut" | "restore", a: Word, b: Word) => {
     setSaving(true);
     try { await api(`/api/videos/${encodeURIComponent(id)}/edits`, { json: { [kind]: [[a.start - 0.001, b.end + 0.001]] } }); }
     catch (e) { alert((e as Error).message); }
     finally { setSaving(false); reload(); }
   };
-  const working = !!v?.job || v?.progress && !v.progress.done && !v.progress.failed && Date.now() / 1000 - v.progress.t < 600 && (v.status === "transcribing" || v.status === "cutting");
+  const working = !!v?.job || v?.progress && !v.progress.done && !v.progress.failed && Date.now() / 1000 - v.progress.t < 900 && (v.status === "transcribing" || v.status === "cutting" || v.status === "making");
   const wide = useMediaQuery("(min-width: 1024px)");
   const [phoneTab, setPhoneTab] = useState<"notes" | "claude">("notes");
-  const approve = async () => { setApproving(true); try { await api(`/api/videos/${encodeURIComponent(id)}/approve`, { json: { stage: "cut" } }); reload(); } finally { setApproving(false); } };
+  const approve = async (stage: "cut" | "edit") => {
+    setApproving(true);
+    try { await api(`/api/videos/${encodeURIComponent(id)}/approve`, { json: { stage } }); if (stage === "cut") setView("edit"); reload(); }
+    finally { setApproving(false); }
+  };
   useEffect(() => {
     if (!v) return;
-    const cutView = hasCut && <GlassSegmented value={view} onChange={(x) => setView(x as "cut" | "raw")} options={[{ value: "cut", label: "Cut" }, { value: "raw", label: "Raw" }]} />;
+    const cutView = hasCut && <GlassSegmented value={showing} onChange={(x) => setView(x as "edit" | "cut" | "raw")} options={viewOptions} />;
     setTitle(
       <span className="flex items-center gap-2"><span className="truncate">{v.title}</span><span className="hidden caption font-normal sm:inline">{STATUS[v.status]?.label}</span></span>,
       <div className="flex items-center gap-2">
@@ -255,17 +291,20 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
         {wide && cutView}
         {v.status === "new" && !v.chat && <Link href={`/new?video=${encodeURIComponent(id)}`} className="flex h-7 items-center rounded-md bg-primary px-3 font-medium text-primary-foreground active:scale-[0.97]">Make the cut</Link>}
         {hasCut && v.status === "ready" && (
-          <button disabled={approving} onClick={approve} className="flex h-7 items-center gap-1 rounded-md bg-primary px-3 font-medium text-primary-foreground active:scale-[0.97]"><Check className="size-3.5" />{wide ? "Approve the cut" : "Approve"}</button>
+          <button disabled={approving} onClick={() => approve("cut")} title="Approve the cut, and Claude makes the edit on top" className="flex h-7 items-center gap-1 rounded-md bg-primary px-3 font-medium text-primary-foreground active:scale-[0.97]"><Check className="size-3.5" />{wide ? "Approve the cut" : "Approve"}</button>
+        )}
+        {hasEdit && v.status === "editing" && (
+          <button disabled={approving} onClick={() => approve("edit")} className="flex h-7 items-center gap-1 rounded-md bg-primary px-3 font-medium text-primary-foreground active:scale-[0.97]"><Check className="size-3.5" />{wide ? "Approve the edit" : "Approve"}</button>
         )}
       </div>,
     );
-  }, [v, view, hasCut, approving, working, id, reload, setTitle, wide]);
+  }, [v, view, showing, hasCut, hasEdit, approving, working, id, reload, setTitle, wide]);
   if (!v) return <div className="grid h-full place-items-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>;
   const sid = v.chat?.id ?? v.session ?? `v_${id}`;
-  const total = showing === "cut" ? maps.total || v.seconds.cut || 0 : v.seconds.source ?? 0;
-  const spans = showing === "cut" ? maps.spans : [{ start: 0, end: v.seconds.source ?? 0 }];
+  const total = onCut ? maps.total || v.seconds.cut || 0 : v.seconds.source ?? 0;
+  const spans = onCut ? maps.spans : [{ start: 0, end: v.seconds.source ?? 0 }];
   const openNotes = v.notes.filter((n) => !n.sent).length;
-  const cutNow = showing === "cut" ? now : maps.toCut(now);
+  const cutNow = onCut ? now : maps.toCut(now);
   const progressPill = working && (
     <div className="absolute top-6 left-1/2 -translate-x-1/2"><div className="liquid-glass liquid-glass-milky flex items-center gap-2 rounded-full px-3 py-1.5 text-[12px] whitespace-nowrap"><Loader2 className="size-3.5 animate-spin text-primary" />{v.progress?.step ?? "Working"}{v.progress?.detail ? ` · ${v.progress.detail}` : ""}</div></div>
   );
@@ -275,7 +314,7 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
     return (
       <div className="h-full overflow-y-auto pb-28">
         <div className="mx-auto max-w-[560px] space-y-3 px-4 pt-3">
-          {hasCut && <div className="flex justify-center"><GlassSegmented value={view} onChange={(x) => setView(x as "cut" | "raw")} options={[{ value: "cut", label: "Cut" }, { value: "raw", label: "Raw" }]} /></div>}
+          {hasCut && <div className="flex justify-center"><GlassSegmented value={showing} onChange={(x) => setView(x as "edit" | "cut" | "raw")} options={viewOptions} /></div>}
           <div className="relative h-[64vh]"><Player src={src} poster={v.media.poster} playerRef={player} onTime={onTime} />{progressPill}</div>
           <GlassSegmented equal value={phoneTab} onChange={(x) => setPhoneTab(x as "notes" | "claude")} options={[{ value: "notes", label: openNotes ? `Notes (${openNotes})` : "Notes" }, { value: "claude", label: "Claude" }]} />
           <div className="panel h-[440px] overflow-hidden">
@@ -322,7 +361,7 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
         </AnimatePresence>
       </div>
       <div className="h-[146px] shrink-0 border-t bg-sidebar">
-        <Timeline spans={spans} total={total} now={now} notes={showing === "cut" ? v.notes : []} onSeek={(t) => { const p = player.current; if (p) p.currentTime = t; }} />
+        <Timeline spans={spans} total={total} now={now} notes={onCut ? v.notes : []} plan={showing === "edit" ? v.plan : null} onSeek={(t) => { const p = player.current; if (p) p.currentTime = t; }} />
       </div>
     </div>
   );

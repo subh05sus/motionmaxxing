@@ -58,11 +58,13 @@ export function lastProgress(id: string): { step: string; detail?: string; progr
 export function notes(id: string): Note[] { return readJson<Note[]>(path.join(editDir(id), "notes.json"), []); }
 export function saveNotes(id: string, n: Note[]): void { writeFileSync(path.join(editDir(id), "notes.json"), JSON.stringify(n, null, 1)); }
 
-/** What exists so far, in plain words: the stage a person sees. */
-export function status(id: string): "new" | "transcribing" | "cutting" | "ready" | "editing" | "approved" {
+/** What exists so far, in plain words: the stage a person sees. "editing" is the edit ready to watch. */
+export function status(id: string): "new" | "transcribing" | "cutting" | "ready" | "making" | "editing" | "approved" {
   const d = editDir(id), r = record(id);
   if (r.stage === "done" || r.approved?.edit) return "approved";
-  if (existsSync(path.join(d, "render.mp4"))) return "editing";
+  const render = mtime(path.join(d, "render.mp4"));
+  if (render && render >= mtime(path.join(d, "plan.json"))) return "editing";
+  if (r.stage === "edit" || render) return "making";   // the cut is approved: the edit is being made (or re-made)
   if (existsSync(path.join(d, "cut.mp4"))) return "ready";
   if (existsSync(path.join(d, "words.raw.json"))) return "cutting";
   if (lastProgress(id)) return "transcribing";
@@ -82,7 +84,7 @@ export function summary(id: string) {
   const d = editDir(id), r = record(id);
   const report = readJson<{ duration?: number; final_s?: number }>(path.join(d, "report.json"), {});
   const meta = readJson<{ lang?: string }>(path.join(d, "meta.json"), {});
-  const updated = Math.max(...["studio.json", "progress.jsonl", "cut.mp4", "render.mp4", "spans.json", "words.raw.json"].map((f) => mtime(path.join(d, f))));
+  const updated = Math.max(...["studio.json", "progress.jsonl", "cut.mp4", "render.mp4", "plan.json", "spans.json", "words.raw.json"].map((f) => mtime(path.join(d, f))));
   return {
     id, title: r.title, createdAt: r.createdAt, updatedAt: new Date(updated || Date.parse(r.createdAt)).toISOString(),
     stage: r.stage, approved: r.approved ?? {}, status: status(id), lang: meta.lang,
@@ -128,4 +130,31 @@ export async function poster(id: string): Promise<string | undefined> {
   if (!src) return undefined;
   if (existsSync(out) && mtime(out) >= mtime(src)) return out;
   try { await run("ffmpeg", ["-v", "error", "-y", "-ss", "1", "-i", src, "-frames:v", "1", "-vf", "scale=360:-2", out]); return out; } catch { return undefined; }
+}
+
+export interface PlanSummary {
+  width: number; height: number; duration: number;
+  cards: { start: number; end: number; label: string; kind: string; place: "scene" | "split" | "box" | "behind" }[];
+  captions: { start: number; end: number; text: string }[];
+  zooms: { start: number; end: number; scale: number }[];
+  sounds: { t: number; name: string }[];
+  music: boolean;
+}
+
+/** The edit as the timeline shows it: plan.json's cards (by placement), captions, zooms and sound, on the cut's clock. */
+export function plan(id: string): PlanSummary | null {
+  const p = readJson<any>(path.join(editDir(id), "plan.json"), null);
+  if (!p) return null;
+  const label = (c: any): string => c.trigger_word || c.anim?.type || (c.src ? path.basename(String(c.src)).replace(/\.[^.]+$/, "") : "visual");
+  return {
+    width: p.width, height: p.height, duration: (p.durationInFrames ?? 0) / (p.fps || 30),
+    cards: (p.cards ?? []).map((c: any) => ({
+      start: c.start, end: c.end, label: String(label(c)).slice(0, 40), kind: c.format || c.anim?.type || (c.src ? "picture" : "card"),
+      place: c.layer === "behind" ? "behind" : c.layout === "scene" ? "scene" : c.layout === "split" || p.layout?.mode === "split" ? "split" : "box",
+    })),
+    captions: (p.captions?.chunks ?? []).map((c: any) => ({ start: c.start, end: c.end, text: c.text })),
+    zooms: (p.zooms ?? []).map((z: any) => ({ start: z.start, end: z.end, scale: z.scale })),
+    sounds: (p.sfx ?? []).map((x: any) => ({ t: x.event ?? x.t, name: path.basename(String(x.src ?? "")).replace(/\.wav$/, "") })),
+    music: !!p.music,
+  };
 }

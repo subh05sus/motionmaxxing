@@ -9,6 +9,12 @@
   python3 setup.py venv                        the engine's Python (3.10-3.13) with requirements.lock, hashes checked
   python3 setup.py model                       Whisper large-v3-turbo for whisper.cpp (1.6 GB) and the voice detector,
                                                sha256 checked
+  python3 setup.py edit-models                 the face finder (YuNet, 230 KB) and the cutout model (Robust Video
+                                               Matting, 15 MB), sha256 checked
+  python3 setup.py remotion                    the renderer: its pinned npm packages in ~/.motionmaxxing/remotion and its
+                                               headless Chrome (about 300 MB, once)
+  python3 setup.py motion                      the motion clip tools: the pinned HyperFrames CLI and GSAP in
+                                               ~/.motionmaxxing/motion and their headless Chrome
   python3 setup.py demo                        self-check (no installs)
 
 Where things go: $MM_HOME (default ~/.motionmaxxing): venv/, models/, env.json (what was installed from which pins).
@@ -37,6 +43,10 @@ ENV = HOME / "env.json"
 PY_OK = ((3, 10), (3, 13))          # wheels exist for every pinned package on these
 NODE_MIN, FFMPEG_MIN = 20, (4, 4)
 WHISPER_MODEL = os.environ.get("MM_WHISPER_MODEL", "large-v3-turbo")
+REMOTION_SRC = PLUGIN / "remotion"
+REMOTION_HOME = HOME / "remotion"
+MOTION_HOME = HOME / "motion"
+MOTION_PY = PLUGIN / "skills" / "motion" / "scripts" / "motion.py"
 BREW = {"ffmpeg": "ffmpeg", "node": "node", "whisper-cli": "whisper-cpp", "git": "git", "python": "python@3.12"}
 
 
@@ -100,6 +110,15 @@ def rows():
     m = models.whispercpp(WHISPER_MODEL)
     out.append(("transcription model", bool(m), WHISPER_MODEL if m else "not downloaded (1.6 GB)",
                 None if m else f"python3 {Path(__file__).name} model"))
+    em = [r for r in ("yunet.onnx", "rvm_mobilenetv3_fp32.onnx") if not (models.DIR / r).exists()]
+    out.append(("face and cutout models", not em, "YuNet, Robust Video Matting" if not em else "not downloaded (15 MB)",
+                None if not em else f"python3 {Path(__file__).name} edit-models"))
+    rv = remotion_installed()
+    out.append(("renderer", bool(rv) and chrome_for(REMOTION_HOME / "node_modules" / ".remotion"),
+                f"remotion {rv}" if rv else "not installed (about 300 MB)",
+                None if rv and chrome_for(REMOTION_HOME / "node_modules" / ".remotion") else f"python3 {Path(__file__).name} remotion"))
+    ok_m, why_m = motion_row()
+    out.append(("motion clip tools", ok_m, why_m, None if ok_m else f"python3 {Path(__file__).name} motion"))
     return out
 
 
@@ -162,6 +181,108 @@ def step_model():
     print("ok   transcription model", flush=True)
 
 
+def remotion_installed():
+    try:
+        return json.loads((REMOTION_HOME / "node_modules" / "remotion" / "package.json").read_text(encoding="utf-8"))["version"]
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def chrome_for(cache):
+    return any(Path(cache).glob("chrome-headless-shell/*"))
+
+
+def quiet(cmd, cwd, what, timeout=1800):
+    """A long install step: its output only when it fails."""
+    print(what, flush=True)
+    r = subprocess.run([str(c) for c in cmd], cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
+    if r.returncode:
+        sys.exit(f"ERROR: {what} failed: {(r.stderr or r.stdout).strip()[-500:]}")
+    return r
+
+
+def step_edit_models():
+    for rel in ("yunet.onnx", "rvm_mobilenetv3_fp32.onnx"):
+        print(f"checking {models.name(rel)}", flush=True)
+        models.fetch(rel, check=False)
+    print("ok   face and cutout models", flush=True)
+
+
+def step_remotion():
+    """The renderer's packages, exactly as its lock pins them (npm ci), then Remotion's own headless Chrome."""
+    npm = shutil.which("npm")
+    if not npm:
+        sys.exit(f"ERROR: npm missing. Run: {brew_fix('node')}")
+    REMOTION_HOME.mkdir(parents=True, exist_ok=True)
+    lock = "package-lock.json"
+    same = (REMOTION_HOME / lock).exists() and (REMOTION_HOME / lock).read_bytes() == (REMOTION_SRC / lock).read_bytes()
+    for f in ("package.json", lock, "tsconfig.json", "render.mjs"):
+        shutil.copy2(REMOTION_SRC / f, REMOTION_HOME / f)
+    shutil.copytree(REMOTION_SRC / "src", REMOTION_HOME / "src", dirs_exist_ok=True)
+    if not same or not remotion_installed():
+        progress.step("Installing the renderer", detail="npm packages", job="setup")
+        quiet([npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error"], REMOTION_HOME,
+              "installing the renderer's packages (npm ci)")
+    if not chrome_for(REMOTION_HOME / "node_modules" / ".remotion"):
+        progress.step("Installing the renderer", detail="its browser", job="setup")
+        quiet([shutil.which("npx"), "remotion", "browser", "ensure"], REMOTION_HOME, "downloading the render browser")
+    print(f"ok   renderer (remotion {remotion_installed()})", flush=True)
+
+
+def motion_pins():
+    text = MOTION_PY.read_text(encoding="utf-8")
+    return {"hyperframes": re.search(r'HF_VERSION = "([^"]+)"', text)[1], "gsap": re.search(r'GSAP_VERSION = "([^"]+)"', text)[1]}
+
+
+def motion_have():
+    have = {}
+    for name in ("hyperframes", "gsap"):
+        try:
+            have[name] = json.loads((MOTION_HOME / "node_modules" / name / "package.json").read_text(encoding="utf-8"))["version"]
+        except (OSError, ValueError, KeyError):
+            pass
+    return have
+
+
+def motion_bin():
+    return MOTION_HOME / "node_modules" / ".bin" / "hyperframes"
+
+
+def motion_row():
+    pins, have = motion_pins(), motion_have()
+    off = [f"{k} {have.get(k, 'missing')}" for k, v in pins.items() if have.get(k) != v]
+    if off:
+        return False, "not installed" if len(off) == len(pins) and not have else "; ".join(off)
+    try:
+        b = run([str(motion_bin()), "browser", "path"], timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return False, "no headless Chrome for clips"
+    if b.returncode:
+        return False, "no headless Chrome for clips"
+    return True, f"hyperframes {pins['hyperframes']}, gsap {pins['gsap']}"
+
+
+def step_motion():
+    """The pinned HyperFrames CLI and GSAP, then the CLI's own headless Chrome."""
+    npm = shutil.which("npm")
+    if not npm:
+        sys.exit(f"ERROR: npm missing. Run: {brew_fix('node')}")
+    MOTION_HOME.mkdir(parents=True, exist_ok=True)
+    pkg = MOTION_HOME / "package.json"
+    if not pkg.exists():
+        pkg.write_text('{"private": true, "description": "motionmaxxing motion clip tools"}\n', encoding="utf-8")
+    pins = motion_pins()
+    if motion_have() != pins:
+        progress.step("Installing the motion clip tools", detail="HyperFrames and GSAP", job="setup")
+        quiet([npm, "install", "--save-exact", "--no-audit", "--no-fund", "--loglevel=error"] + [f"{k}@{v}" for k, v in pins.items()],
+              MOTION_HOME, "installing the motion clip tools (npm install)")
+    b = run([str(motion_bin()), "browser", "path"], timeout=60)
+    if b.returncode:
+        progress.step("Installing the motion clip tools", detail="their browser", job="setup")
+        quiet([str(motion_bin()), "browser", "ensure"], MOTION_HOME, "downloading the clip browser")
+    print(f"ok   motion clip tools (hyperframes {pins['hyperframes']})", flush=True)
+
+
 def install_all():
     plan = []
     for name, ok, _, fix in rows():
@@ -173,6 +294,12 @@ def install_all():
             plan.append(("Setting up the engine", step_venv))
         elif name == "transcription model":
             plan.append(("Downloading the transcription model", step_model))
+        elif name == "face and cutout models":
+            plan.append(("Downloading the face and cutout models", step_edit_models))
+        elif name == "renderer":
+            plan.append(("Installing the renderer", step_remotion))
+        elif name == "motion clip tools":
+            plan.append(("Installing the motion clip tools", step_motion))
         elif fix:
             print(f"FIX  {name}: {fix}")
     for i, (label, fn) in enumerate(plan):
@@ -196,7 +323,8 @@ def demo():
         VPY = VENV / "bin" / "python"
         assert venv_ok() == (False, "not made yet")
         names = [r[0] for r in rows()]
-        assert names == ["ffmpeg", "node", "whisper.cpp", "python 3.10-3.13", "engine venv", "transcription model"]
+        assert names == ["ffmpeg", "node", "whisper.cpp", "python 3.10-3.13", "engine venv", "transcription model",
+                         "face and cutout models", "renderer", "motion clip tools"], names
         HOME, VENV, VPY = old
     for p in python_candidates():
         v = version_of([p, "--version"], r"Python (\d+)\.(\d+)")
@@ -216,6 +344,12 @@ def main():
         return step_venv()
     if a == ["model"]:
         return step_model()
+    if a in (["edit-models"], ["matte"], ["face"]):
+        return step_edit_models()
+    if a == ["remotion"]:
+        return step_remotion()
+    if a == ["motion"]:
+        return step_motion()
     print(__doc__)
     return 2
 

@@ -535,11 +535,11 @@ def demo():
         assert "max_pause" not in read_json().get("cut", {}) and load_md()["Cut"] == []
         # a suggestion for everyone carries the rule, never the user's files, names or links
         r = suggest(f"zoom snapped on {Path.home()}/Movies/take 3.mov for @someone", "Zooms ease over at least 0.5 s",
-                    "style-edit quality.py", "jane@example.org saw it on https://example.com/x, IMG.MOV")
+                    "edit quality.py", "jane@example.org saw it on https://example.com/x, IMG.MOV")
         assert "Movies" not in json.dumps(r) and "@someone" not in r["what"] and "<file>" in r["example"], r
         assert "<email>" in r["example"] and "<link>" in r["example"] and r["rule"] == "Zooms ease over at least 0.5 s", r
         assert scrub("captions at 1/3 height") == "captions at 1/3 height"
-        assert issue().startswith("Suggestion: Zooms ease") and "**Owner:** style-edit quality.py" in issue()
+        assert issue().startswith("Suggestion: Zooms ease") and "**Owner:** edit quality.py" in issue()
         # the profile's names, their domains and the creators' handles, and any bare domain, never leave
         (HOME / "profile.json").write_text(json.dumps({"names": ["Example Product", {"name": "Example Tool",
                                                        "domain": "example.com"}], "creators": [{"handle": "example-creator"}]}), encoding="utf-8")

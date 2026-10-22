@@ -2,7 +2,7 @@
 name: taste
 description: Remembers how the user likes their videos edited, so they never give the same correction twice. Saves every correction or preference about an edit (the cut, captions, visuals, sound, layout) into ~/.motionmaxxing/taste.md as a plain rule, and into taste.json when it maps to a setting the scripts read (pause length, fillers, caption size, words per caption, zooms, sound, layout), deduplicated, scoped to every video or just this one, and counted when applied; one that would help everyone goes to the maintainers. Every other motionmaxxing skill reads both before it starts. Use whenever the user reacts to an edit ("too slow", "captions are too small", "fewer zooms", "I hate the whoosh", "that's perfect, keep it like that"), and when they ask "what do you know about my taste", "show my settings", "forget that rule" or "are you learning". Also learns how they cut from a raw take and their posted version ("I already edit by hand", "learn from my edit"). Not for a finished video's notes as a batch (skill-improver).
 license: MIT
-compatibility: Python 3.9+, standard library only. Runs from the full ai-editor plugin folder (uses its lib/).
+compatibility: Python 3.9+, standard library only. Runs from the full motionmaxxing plugin folder (uses its lib/).
 ---
 
 # Taste
@@ -35,7 +35,7 @@ replaces them. Everything the user teaches goes in the files above.
    never its folder or `@id`. Skip the question only when they already said it ("always", "just this one").
    `Would help everyone` saves it to their style too, then step 6.
    Notes sent from the review page never get this question: only the ones the user ticked "Keep as a
-   rule" become rules, saved without asking (style-edit `references/review.md`).
+   rule" become rules, saved without asking (edit `references/review.md`).
 3. Save it with `add`, with the setting when one maps (table below) and the edit it was said on:
 
 ```bash
@@ -80,7 +80,7 @@ python3 "$S/taste.py" add captions "Captions smaller" --set captions.size_pct=4.
    without their media, names or links (the script scrubs paths, file names, emails, handles and links too):
 
 ```bash
-python3 "$S/taste.py" suggest "Zoom snapped in over 2 frames" "Zooms ease in over at least 0.5 s" --owner "style-edit quality.py zoom check" --example "a 1.2x punch at 0.07 s"
+python3 "$S/taste.py" suggest "Zoom snapped in over 2 frames" "Zooms ease in over at least 0.5 s" --owner "edit quality.py zoom check" --example "a 1.2x punch at 0.07 s"
 python3 "$S/taste.py" issue          # shows the issue it would open
 ```
 

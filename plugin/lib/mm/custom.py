@@ -15,7 +15,7 @@ Layout. Only what the code reads:
                            It wins over the creator's measured captions; taste.json's own caption keys win over it.
   templates/<type>.json    default props for one motion template (flow, social_post, arrow_callout, ...).
                            A beat's own props win.
-  sounds/                  the sound library (the video page's Sounds panel, style-edit sfx.py): your own sound
+  sounds/                  the sound library (the video page's Sounds panel, edit sfx.py): your own sound
                            files, and choices.json, which sound plays for each moment (default, none, or a file).
   prompts/judge-rubric.md  replaces the cut critic's rubric (copy the plugin's skills/cut/references/judge-rubric.md
                            first and keep its output format).

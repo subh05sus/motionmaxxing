@@ -247,7 +247,7 @@ def demo():
             pass
         # find_skill: the user's folders only, never a plugin skill
         os.environ["MM_SKILLS"] = tmp
-        assert find_skill("my-edit") == md and find_skill("motionmaxxing:style-edit") is None and find_skill("../x") is None
+        assert find_skill("my-edit") == md and find_skill("motionmaxxing:edit") is None and find_skill("../x") is None
     # for_editing: what the Skills page lists. A real video word is enough; "edit" alone or an off-topic word is not
     for n, d in (("card-edit", "Edits the user's video in the Card edit style."), ("media-use", "Resolve BGM, SFX or a logo."),
                  ("hyperframes-cli", "The HyperFrames CLI loop: lint, render."), ("captions-pop", "")):

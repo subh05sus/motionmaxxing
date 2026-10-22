@@ -9,7 +9,7 @@
     python3 links.py demo                                   self-check on 40+ real URL shapes
     python3 links.py live                                   network check: a /channel/ link and a Spotify show
 
-Kinds: own (the user's footage: cut + style-edit), takes (several own files joined into one video, then cut),
+Kinds: own (the user's footage: cut + edit), takes (several own files joined into one video, then cut),
 creator (creator-teardown), long (clips),
 product (product-video), music (the music question with rights), video (a single video whose
 kind depends on its length and whose it is: `decide`), ask (one question in the question box),
@@ -62,13 +62,13 @@ LOOKUP = "https://itunes.apple.com/lookup?id="
 TEARDOWN_PLATFORMS = ("tiktok", "youtube", "instagram")  # what creator-teardown's fetch.py lists
 ORDER = ("ask", "creator", "takes", "own", "video", "long", "product", "music", "unsupported")
 ACTION = {
-    "own": "fetch into the edit folder, then cut + style-edit",
-    "own-local": "cut it where it is (never copied; the cut skill reads the path), then style-edit",
-    "takes": "join the files in order into edits/<name>/joined.mp4 (cut/references/takes.md), then cut + style-edit",
+    "own": "fetch into the edit folder, then cut + edit",
+    "own-local": "cut it where it is (never copied; the cut skill reads the path), then edit",
+    "takes": "join the files in order into edits/<name>/joined.mp4 (cut/references/takes.md), then cut + edit",
     "creator": "creator-teardown (quick mode), then blend the style",
     "long": "clips",
     "product": "product-video",
-    "music": "the music question with rights (style-edit or product-video)",
+    "music": "the music question with rights (edit or product-video)",
     "video": "read its length (route does), then decide",
     "ask": "one question in the question box, recommended option first",
     "unsupported": "say the note to the user",

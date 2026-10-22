@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI for the user's taste. The code lives in the plugin's lib/mm/taste.py (shared with cut and style-edit).
+"""CLI for the user's taste. The code lives in the plugin's lib/mm/taste.py (shared with cut and edit).
 
     python3 taste.py show | rule <section> "<rule>" | set <key.path> <value> | unset <key.path> | get | demo
 """

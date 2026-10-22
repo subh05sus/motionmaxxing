@@ -15,13 +15,14 @@ export const STATUS: Record<string, { label: string; tone: string }> = {
   transcribing: { label: "Listening", tone: "text-primary" },
   cutting: { label: "Cutting", tone: "text-primary" },
   ready: { label: "Cut ready", tone: "text-success" },
+  making: { label: "Making the edit", tone: "text-primary" },
   editing: { label: "Edit ready", tone: "text-success" },
   approved: { label: "Approved", tone: "text-muted-foreground" },
 };
 
 export function VideoCard({ v, index = 0 }: { v: VideoSummary; index?: number }) {
   const st = STATUS[v.status] ?? STATUS.new!;
-  const working = v.status === "transcribing" || v.status === "cutting";
+  const working = v.status === "transcribing" || v.status === "cutting" || v.status === "making";
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ ...SPRING_SNAPPY, delay: staggerDelay(index) }}>
       <Link href={`/videos/${encodeURIComponent(v.id)}`} className="group block rounded-[12px] p-1.5 hover:bg-foreground/5 active:scale-[0.985] transition-transform">

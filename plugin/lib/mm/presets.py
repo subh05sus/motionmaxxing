@@ -5,7 +5,7 @@ Stdlib only (plus ffmpeg and the installed renderer for previews).
     python3 presets.py list     every caption preset (built in, then the user's custom/captions/) and the others
     python3 presets.py demo     self-check (no renderer needed)
 
-Caption presets are files: plugins/ai-editor/presets/captions/<name>.json (built in) and
+Caption presets are files: plugin/presets/captions/<name>.json (built in) and
 <library>/custom/captions/<name>.json (the user's, custom.py; same name = the user's wins). Each is a captions
 block of style.json that plan.py and Captions.tsx already read. Picking one saves captions.preset=<name>;
 plan.py lays the block over the creator's measured captions, and taste.json's own caption keys (size, height)
@@ -341,7 +341,7 @@ def prune():
 RENDERER = Renderer()
 
 
-_EDIT = str(PLUGIN / "skills" / "style-edit" / "scripts")
+_EDIT = str(PLUGIN / "skills" / "edit" / "scripts")
 
 
 def renderer_dir():

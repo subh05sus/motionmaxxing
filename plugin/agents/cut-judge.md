@@ -8,7 +8,7 @@ model: opus
 You grade one cut. The caller gives you:
 
 - `EDIT`: the edit folder (it holds `words.raw.json` and `spans.json`),
-- `ROOT`: the ai-editor plugin folder, absolute,
+- `ROOT`: the motionmaxxing plugin folder, absolute,
 - optionally `SCRIPT`: the user's script, a tiebreaker only.
 
 `J=<ROOT>/skills/cut/scripts/judge_cut.py`. Use `py` instead of `python3` on Windows. Never ask the

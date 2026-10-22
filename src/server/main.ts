@@ -110,13 +110,31 @@ function cutPrompt(id: string, extra: { instructions?: string; script?: string }
   ].join("\n");
 }
 
+function editPrompt(id: string): string {
+  const d = lib.editDir(id);
+  const own = existsSync(path.join(LIBRARY, "creator-teardowns", "own", "style.json"));
+  return [
+    "The user approved the cut in the motionmaxxing studio. Make the edit with the motionmaxxing edit skill (load it with",
+    "the Skill tool: motionmaxxing:edit) and follow it through step 8, with these settled:",
+    "",
+    `- Edit folder: ${d} (cut.mp4, words.json and cut.transcript.json are there)`,
+    own ? `- The style: the owner's own measured style, ${path.join(LIBRARY, "creator-teardowns", "own", "style.json")} (copy it to style.json), unless the chat named another.`
+        : "- The style: step 1 of the skill picks it.",
+    "- The video is German: captions keep the user's words exactly (only spelling fixes with retakes.py fix).",
+    "- Pick the placement per beat (behind, half, box, full screen) and use real things only: never a text card.",
+    "- Render on this Mac. The studio shows render.mp4 and the plan's timeline by itself: never open a browser or a page.",
+    "- Ask only with AskUserQuestion (the studio shows a card).",
+    "- End with one short message: the length, the style, how many visuals and where they sit, anything to check.",
+  ].join("\n");
+}
+
 function notesPrompt(id: string, notes: lib.Note[]): string {
   const d = lib.editDir(id);
   return [
-    `The user left notes on the ${notes[0]?.stage ?? "cut"} of ${d} in the studio, each at a moment of the video (seconds on the cut):`,
+    `The user left notes on the ${notes[0]?.stage ?? "cut"} of ${d} in the studio, each at a moment of the video (seconds on the ${notes[0]?.stage === "edit" ? "edit (render.mp4, the cut's clock)" : "cut"}):`,
     ...notes.map((n) => `- at ${n.t.toFixed(1)} s: ${n.text}`),
     "",
-    "Fix each one (the cut: change spans.json and keep.json by quoting, then build, render and verify as the cut skill says).",
+    notes[0]?.stage === "edit" ? "Fix each one as the edit skill says (visuals.json, images.json, style.json, then plan, stills and render again; a note about the cut itself: the cut skill)." : "Fix each one (the cut: change spans.json and keep.json by quoting, then build, render and verify as the cut skill says).",
     "Then answer each note in one short line, in the order given, starting each with its time.",
   ].join("\n");
 }
@@ -225,7 +243,7 @@ const server = http.createServer(async (req, res) => {
       if (!action && m === "GET") {
         const r = lib.record(id);
         const c = r.session ? claude.get(r.session) : undefined;
-        return sendJson(res, 200, { ...lib.summary(id), transcript: lib.transcript(id), notes: lib.notes(id), job: jobs.get(id) ?? null, chat: c ? { id: c.id, status: c.status } : null });
+        return sendJson(res, 200, { ...lib.summary(id), transcript: lib.transcript(id), plan: lib.plan(id), notes: lib.notes(id), job: jobs.get(id) ?? null, chat: c ? { id: c.id, status: c.status } : null });
       }
       if (action === "start" && m === "POST") {
         const b = await body(req);
@@ -276,10 +294,19 @@ const server = http.createServer(async (req, res) => {
       if (action === "approve" && m === "POST") {
         const b = await body(req);
         const r = lib.record(id);
-        r.approved = { ...(r.approved ?? {}), [b.stage === "edit" ? "edit" : "cut"]: new Date().toISOString() };
-        if (b.stage !== "edit") r.stage = "edit"; else r.stage = "done";
+        const stage = b.stage === "edit" ? "edit" : "cut";
+        r.approved = { ...(r.approved ?? {}), [stage]: new Date().toISOString() };
+        r.stage = stage === "cut" ? "edit" : "done";
+        const sid = r.session ?? `v_${id}`;
+        if (!r.session) r.session = sid;
         lib.saveRecord(id, r);
-        if (r.session) claude.note(r.session, b.stage === "edit" ? "The user approved the edit." : "The user approved the cut.", "ok");
+        claude.ensure(sid, r.title, lib.editDir(id));
+        if (stage === "cut") {
+          // Approving the cut is the go for the edit (one approve, then the edit is made and shown).
+          claude.send(sid, "The cut is approved. Make the edit.", editPrompt(id));
+        } else {
+          claude.send(sid, "The user approved the edit.", `The user approved the edit of ${lib.editDir(id)}. Do the edit skill's step 8 after approval (save the motion clips), then stop with one short line.`);
+        }
         broadcast("video", { id });
         return sendJson(res, 200, lib.summary(id));
       }

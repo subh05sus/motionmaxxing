@@ -32,14 +32,14 @@ File: ~/.motionmaxxing/profile.json (MM_HOME overrides). Shape:
    "avoid": {"emoji": true, "stock": true, "icons": true, "colors": ["#7B61FF"], "notes": ""},
    "captions": {"on": true, "style": "creator"},     style: creator | plain | bold | karaoke | minimal
    "sound": {"sfx": true, "music": false},           music: unset follows the style (a bed when the creator uses one)
-   "behind": true,                                     cards sit behind the speaker (style-edit matte.py)
+   "behind": true,                                     cards sit behind the speaker (edit matte.py)
    "cloud_cleanup": true,                              delete uploaded footage from GitHub / S3 after a cloud render
    "render": "laptop",                                 where every render goes (laptop), asked once
    "loudness": "leave",                                the take's own level: leave | normalize, asked once
    "past_edit": true}                                  learned from a raw take and their posted cut (taste learn.py); false: declined
 
 Look order (plan.py): the profile's brand kit > the copied creators' measured style.json > the
-`editorial` preset. No creator: DEFAULT_STYLE (style-edit references/plan.md "No creator").
+`editorial` preset. No creator: DEFAULT_STYLE (edit references/plan.md "No creator").
 `set` of a style answer and `defaults` also refresh the my-style skill (styleskill.py). Stdlib only.
 """
 import colorsys
@@ -74,7 +74,7 @@ GENERIC_FONTS = {"inter", "roboto", "poppins", "montserrat", "open sans", "arial
                  "manrope", "dm sans", "plus jakarta sans", "outfit", "space grotesk", "satoshi", "general sans", "sora", "urbanist"}
 # Flat saturated colour grounds read as AI-made: only the user's own brand kit may name one.
 FLAT_GROUND_PRESETS = ("poster-red", "poster-green", "poster-blue")
-# The caption answers are the built-in caption presets (plugins/ai-editor/presets/captions/*.json, presets.py).
+# The caption answers are the built-in caption presets (plugin/presets/captions/*.json, presets.py).
 # plain: the no-creator default and an answer of its own. White TikTok Sans (SIL OFL, on Google Fonts) at 4.2% of the
 # long side, weight 600, as spoken (no forced case), no stroke, box, shadow, highlight or animation: each page cuts on.
 # plan.py's contrast ladder adds a soft shadow first, and more only where the footage behind a page needs it.
@@ -236,7 +236,7 @@ def resolve_look(style, prof=None, warn=print):
 # The recommended answer when no creator is named. Overlay-first and smooth (PRINCIPLES.md "Smooth before varied"):
 # the smooth personality, push zooms eased 0.8 s each way on sine.inOut (a camera move, never a step), captions the
 # footage decides the treatment of (plan.py's contrast ladder). Numbers: the median of the measured styles the editor
-# was built against (the style.json example in style-edit references/contracts.md, the test teardown, one 7-video
+# was built against (the style.json example in edit references/contracts.md, the test teardown, one 7-video
 # creator teardown): scale 1.18 / 1.18 / 1.2, 6 / 9.5 / 10 zooms a minute; median shot 2.4 / 2.4 / 3.98 s;
 # 1 / 3 / 3 words a caption, 4.7 / 5.5 / 6.5% type, y 62 / 66 / 75%, lower case in all three. Captions are the owner's
 # plain look (PLAIN_CAPTIONS), smaller than the measured median; words a page and y stay measured. The three measured
@@ -259,14 +259,14 @@ def default_style(prof=None):
     return answers(json.loads(json.dumps(DEFAULT_STYLE)), prof or {})
 
 
-# A cut kind -> style-edit's scene transition: the same map and 5% floor as creator-teardown visual.py
+# A cut kind -> edit's scene transition: the same map and 5% floor as creator-teardown visual.py
 # TRANSITION / transitions_of (hard, jump and zoom-punch cuts have none).
 CUT_TRANSITION = {"whip": "push", "match": "match", "mask": "wipe", "dissolve": "fade"}
 
 
 def fill_transitions(style, warn=print):
     """A style.json from a teardown made before visual.py wrote "transitions": derive them from the measured
-    pace.cut_kinds ([] for a creator who only cuts). No cut kinds measured: leave style-edit's default and,
+    pace.cut_kinds ([] for a creator who only cuts). No cut kinds measured: leave edit's default and,
     for a creator's style, say re-running the teardown gets them. Never guessed."""
     if "transitions" in style or style.get("handle", "default") == "default":
         return style

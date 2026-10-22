@@ -4,7 +4,7 @@
     python3 retakes.py text    <edit_dir>              transcript.txt, one line per phrase
     python3 retakes.py propose <edit_dir>              transcript.txt + candidates.md
     python3 retakes.py fix     <edit_dir> cloud=Claude [haiku=Haiku ...]   fix misheard words
-    python3 retakes.py captions <edit_dir>             captions.json + captions.txt for style-edit
+    python3 retakes.py captions <edit_dir>             captions.json + captions.txt for edit
     python3 retakes.py hook    <edit_dir> <n>          <edit_dir>-hook<n>/: the cut opening on alternate hook n
     python3 retakes.py remap   <edit_dir>              re-point visuals built before a re-cut
 
@@ -20,12 +20,12 @@ propose  1. Code finds every candidate: a restart (words said again within 40 s:
          (after the call to action) are cut from the main cut as `alt_hook` and listed in
          hooks.json, so the hook stays at the start and the cut never ends on one.
 fix      Replaces one whole word everywhere in words.raw.json, words.json, cut.transcript.json
-         and captions.json (style-edit's caption text), keeping
+         and captions.json (edit's caption text), keeping
          punctuation and timings. A misheard name costs one command, not a rewrite. Each pair is
          kept in fixes.json, so captions applies it again.
 hook     A variant edit dir for alternate hook n (1-based, from hooks.json): the same spans,
          with the opening hook cut, that alternate kept, and lead.json telling build_timeline.py
-         to play it first. Build, render, verify and style-edit it like any edit dir.
+         to play it first. Build, render, verify and edit it like any edit dir.
 captions The caption words: what the verify pass heard in cut.mp4 (cut.transcript.json), timed to
          it, with every word it heard differently at the same time (textnorm.pair_by_time) taken
          from the approved cut text (words.json), names spelled as the profile's `names`, and

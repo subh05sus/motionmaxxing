@@ -31,7 +31,7 @@ def context():
     try:
         import certifi
         bundles = [certifi.where()]
-    except ImportError:   # system python3: the editor venv's certifi, by path, without importing it
+    except (ImportError, AttributeError):   # no certifi, or a broken one (an empty namespace folder): the venv's, by path
         home = os.environ.get("MM_HOME") or os.path.join(os.path.expanduser("~"), ".motionmaxxing")
         sp = [os.path.join(home, "venv", "lib", "python*", "site-packages"),
               os.path.join(home, "venv", "Lib", "site-packages")]

@@ -326,10 +326,10 @@ def body(style_path=None, fmt=None):
         cap = (prof.get("captions") or {}).get("style") or "creator"
         desc = describe(None, f"the user's own saved style (copies {who}; captions: {cap})",
                         ["edit it the way I like"], "the user's own videos, their profile and every correction saved as My style")
-        head = (f"# {display()}\n\nEdits the user's video in their own style with the ai-editor plugin.\n\n"
+        head = (f"# {display()}\n\nEdits the user's video in their own style with the motionmaxxing plugin.\n\n"
                 f"- Profile: `{taste.HOME / 'profile.json'}` (copies {who}; captions: {cap})\n"
                 f"- Taste: `{taste.HOME / 'taste.md'}` and `taste.json` (the settings the scripts read)\n\n"
-                "## Run\n\n1. Run the ai-editor `start` skill on the user's video. It reads the profile and the taste by itself.\n"
+                "## Run\n\n1. Run the motionmaxxing `start` skill on the user's video. It reads the profile and the taste by itself.\n"
                 "2. Review notes that are preferences: scope `My style` saves them to the taste and to the section below.\n\n"
                 "Follow every rule in \"Learned from your feedback\".\n")
         empty = "Nothing yet. Notes saved at \"My style\" land here."
@@ -351,17 +351,17 @@ def body(style_path=None, fmt=None):
         desc = describe(sp, what + (f" ({', '.join(p.split(' (')[0] for p in parts)})" if parts else ""), extra,
                         "videos meant to look like that creator's, with the corrections given on this style")
         h = said if sample else "@" + (said.lstrip("@") if len(mix) > 1 else h)
-        head = (f"# Edit like {said}\n\nEdits the user's video in {who} ({'ships with the plugin' if sample else 'measured'}) with the ai-editor plugin.\n\n"
+        head = (f"# Edit like {said}\n\nEdits the user's video in {who} ({'ships with the plugin' if sample else 'measured'}) with the motionmaxxing plugin.\n\n"
                 f"- Style: `{sp}` ({'the plugin keeps it current' if sample else 'measured by creator-teardown'}; never edit it by hand)\n"
                 f"- Corrections: `{overrides_path(sp)}` (laid over the style; a re-study keeps them)\n"
                 + (f"- Format: their {one} (videos of other formats were left out)\n" if one else "")
                 + (f"- Copies: {'; '.join(parts)}\n" if parts else "")
                 + (f"- Script format: the `{fmt}` skill (it writes the script; this one edits the footage)\n" if fmt else "")
                 + "\n## Run\n\n"
-                "1. Run the ai-editor `start` skill on the user's video. At its \"Blend the style\" step use this style\n"
+                "1. Run the motionmaxxing `start` skill on the user's video. At its \"Blend the style\" step use this style\n"
                 "   instead of the profile's creators (`$P` is the plugin's `lib/mm/profile.py`):\n"
                 f"   `python3 \"$P\" style edits/<name> --from \"{sp}\"`\n"
-                "2. Then cut and style-edit as start says. plan.py and the cut lay the corrections over the style themselves.\n"
+                "2. Then cut and edit as start says. plan.py and the cut lay the corrections over the style themselves.\n"
                 "   Cards come at this creator's rate, kinds and place (route.py marks the `want` lines); fix every `style:`\n"
                 "   line plan.py's style check prints before the stills.\n"
                 f"3. Review notes that are preferences: ask the scope with `This style ({h}) (Recommended)` first, then\n"
