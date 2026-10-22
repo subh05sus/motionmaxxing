@@ -57,9 +57,11 @@ Follow every taste rule; the scripts read the settings themselves. When the user
   `[{"src": "images/dashboard.png", "word": "dashboard", "nth": 1}]` (optional `layout`, `layer`, `hold_s`,
   `entrance`; transparent PNG and Lottie `.json` work). Their b-roll folders: `python3 "${CLAUDE_PLUGIN_ROOT}/lib/mm/broll.py"
   list`, then `broll.py sheet <name>`: look at every sheet, copy only clips that show what a line says.
-- **A demo recording** (the record skill, `<library>/recordings/<name>/demo-9x16.mp4` or `demo.mp4`): copy it into
-  `images/` and use it as a `video_card` on the line it shows. A line that says "Claude does X" or "on the site you
-  click Y" and has no recording yet: record one with the record skill first (it asks once per site).
+- **A demo recording** (the record skill): `python3 "${CLAUDE_PLUGIN_ROOT}/lib/mm/library.py" recordings` lists the
+  library's, each with its page and what it shows. One that shows what a line names (the same site, product or page)
+  goes on that line, whichever video it was made for: in a footage clip (the motion skill's `references/kit-clips.md`,
+  "Footage"), never as a raw page crop. A line that names a site or a product, or says "Claude does X" or "on the site
+  you click Y", with none yet: record one with the record skill first (it asks once per site).
 
 ## 2. Captions text
 

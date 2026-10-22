@@ -5,6 +5,7 @@
     python3 library.py set <folder>         move it: new videos land there, older ones stay listed
     python3 library.py record <edit dir>    list an edit folder made somewhere else (review.py start does this)
     python3 library.py list                 every video, newest first, as JSON
+    python3 library.py recordings           every demo recording (its page, what it shows, the video it was made for)
     python3 library.py clean [--yes]        the working files that can go and their size; --yes deletes them
     python3 library.py demo                 self-check
 
@@ -188,6 +189,24 @@ def styles(lib=None):
     return out
 
 
+def recordings(lib=None):
+    """Every finished demo recording in the library, newest first: [{name, title, url, show, for, videos}]. A recording
+    shows a page or a product, so any edit whose line names it can show it, whichever video it was made for."""
+    root = Path(lib or path()) / "recordings"
+    out = []
+    for d in sorted((x for x in root.iterdir() if x.is_dir()), key=lambda x: x.stat().st_mtime, reverse=True) if root.is_dir() else []:
+        videos = sorted(f.name for f in d.glob("*.mp4"))
+        if not videos:
+            continue   # still recording, or failed
+        try:
+            b = json.loads((d / "brief.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            b = {}
+        out.append({"name": d.name, "title": b.get("title") or d.name, "url": b.get("url"), "show": b.get("show"),
+                    "for": b.get("for"), "videos": videos})
+    return out
+
+
 # ---------------------------------------------------------------- recent videos and thumbnails
 def home_dirs():
     """The usual folders, scanned only once the user turns it on (so macOS asks for folder access only then)."""
@@ -362,6 +381,18 @@ def demo():
     set_path(tmp / "lib2")
     assert path() == (tmp / "lib2").resolve(), "set is remembered"
     set_path(lib)
+    # demo recordings: a finished one is listed with its brief, one with no video yet is not
+    for n, brief, vid in (("site", {"title": "Site", "url": "https://x.test", "show": "the hero", "for": "take"}, True),
+                          ("bare", None, True), ("unfinished", {"title": "Later"}, False)):
+        (lib / "recordings" / n).mkdir(parents=True)
+        if brief:
+            (lib / "recordings" / n / "brief.json").write_text(json.dumps(brief), encoding="utf-8")
+        if vid:
+            (lib / "recordings" / n / "plain.mp4").write_bytes(b"0")
+    rs = {r["name"]: r for r in recordings(lib)}
+    assert set(rs) == {"site", "bare"} and rs["site"]["for"] == "take" and rs["site"]["videos"] == ["plain.mp4"], rs
+    assert rs["bare"]["title"] == "bare" and rs["bare"]["url"] is None, rs
+    shutil.rmtree(lib / "recordings")
     # an edit made elsewhere (a project folder) is listed once recorded; one in the library is found by itself
     away = tmp / "project" / "edits" / "away"
     away.mkdir(parents=True)
@@ -445,6 +476,8 @@ def main():
         return record(a[1])
     if a[:1] == ["list"]:
         return print(json.dumps(entries(), indent=1))
+    if a[:1] == ["recordings"]:
+        return print(json.dumps(recordings(), indent=1, ensure_ascii=False))
     if a[:1] == ["clean"]:
         fs, n = clean(yes="--yes" in a)
         return print(f"{'deleted' if '--yes' in a else 'would delete'} {len(fs)} working files, {n / 1e6:.0f} MB")

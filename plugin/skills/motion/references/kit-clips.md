@@ -25,8 +25,9 @@ sentences. For each, one idea and where it plays:
 
 - Clips run back to back: each clip's `t0` is the previous clip's end. Half-screen clips crossfade into each other.
 - Not too fast: a cutaway holds about 2 s or more; never more than three layout changes in ten seconds.
-- A recording made for the video (the record skill) goes in it: as a footage clip (below), never as a zoomed page
-  crop in the panel (cut headings, a sliced nav bar). check.py plan FAILs a recording made for the video that is in
+- A recording made for the video (the record skill) goes in it, and so does any in the library that shows what a line
+  names (`library.py recordings`: each one's page and what it shows), whichever video it was made for: as a footage
+  clip (below), never as a zoomed page crop in the panel (cut headings, a sliced nav bar). check.py plan FAILs a recording made for the video that is in
   no clip (its brief.json "for"), unless its brief says "skip": "<why>".
 - The speaker's face for an avatar or a thumbnail: `motion.py portrait <edit>` (a pause between words, the head
   centred), then look at `images/avatar.jpg` and `images/portrait-9x16.jpg`; `--at T` for another moment.
