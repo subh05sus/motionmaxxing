@@ -161,8 +161,16 @@ function Transcript({ words, now, onSeek, onEdit, busy }: { words: Word[]; now: 
 
 function Timeline({ spans, total, now, notes, onSeek, plan }: { spans: { start: number; end: number }[]; total: number; now: number; notes: Note[]; onSeek: (t: number) => void; plan?: PlanSummary | null }) {
   const bar = useRef<HTMLDivElement>(null);
+  // Press anywhere on the tracks (or on the playhead) and drag to scrub: the playhead follows the pointer at once,
+  // the video seeks once a frame, and the pointer stays captured when it leaves the timeline.
+  const [drag, setDrag] = useState<number | null>(null);
+  const frame = useRef(0);
   const pct = (t: number) => `${Math.max(0, Math.min(100, (t / (total || 1)) * 100))}%`;
-  const seek = (e: React.MouseEvent) => { const r = bar.current!.getBoundingClientRect(); onSeek(((e.clientX - r.left) / r.width) * total); };
+  const at = (x: number) => { const r = bar.current!.getBoundingClientRect(); return Math.max(0, Math.min(total, ((x - r.left) / r.width) * total)); };
+  const scrub = (x: number) => { const t = at(x); setDrag(t); cancelAnimationFrame(frame.current); frame.current = requestAnimationFrame(() => onSeek(t)); };
+  const down = (e: React.PointerEvent<HTMLDivElement>) => { if (e.button !== 0) return; e.currentTarget.setPointerCapture(e.pointerId); scrub(e.clientX); };
+  const up = (e: React.PointerEvent<HTMLDivElement>) => { if (drag === null) return; cancelAnimationFrame(frame.current); onSeek(at(e.clientX)); setDrag(null); };
+  const head = drag ?? now;
   const block = (a: number, b: number) => ({ left: pct(a), width: `calc(${pct(Math.max(0.05, b - a))} - 1px)` });
   const tracks: [string, ReactNode][] = [
     ["Video", <>
@@ -183,7 +191,8 @@ function Timeline({ spans, total, now, notes, onSeek, plan }: { spans: { start: 
   return (
     <div className="flex h-full select-none">
       <div className="w-20 shrink-0 border-r pt-5">{tracks.map(([n]) => <div key={n} className="flex h-7 items-center px-3 caption">{n}</div>)}</div>
-      <div className="relative min-w-0 flex-1 cursor-pointer" ref={bar} onMouseDown={seek}>
+      <div className={cn("relative min-w-0 flex-1 touch-none", drag === null ? "cursor-pointer" : "cursor-grabbing")} ref={bar}
+        onPointerDown={down} onPointerMove={(e) => { if (drag !== null) scrub(e.clientX); }} onPointerUp={up} onPointerCancel={() => setDrag(null)}>
         <div className="relative h-5 border-b">
           {Array.from({ length: Math.max(1, Math.floor(total / 5)) + 1 }, (_, i) => i * 5).filter((t) => t <= total).map((t) => (
             <span key={t} className="absolute top-0 h-full border-l border-foreground/15 pl-1 text-[10px] text-faint-foreground tabular" style={{ left: pct(t) }}>{t % 15 === 0 ? clock(t) : ""}</span>
@@ -191,7 +200,11 @@ function Timeline({ spans, total, now, notes, onSeek, plan }: { spans: { start: 
           {notes.map((n) => <span key={n.id} title={n.text} className="absolute top-0.5 size-2.5 -translate-x-1/2 rounded-full bg-warning" style={{ left: pct(n.t) }} />)}
         </div>
         {tracks.map(([n, body]) => <div key={n} className="relative h-7 border-b border-foreground/5">{body}</div>)}
-        <div className="pointer-events-none absolute top-0 bottom-0 w-px bg-primary" style={{ left: pct(now) }}><span className="absolute -top-px -left-[5px] size-[11px] rounded-full bg-primary" /></div>
+        <div className="pointer-events-none absolute top-0 bottom-0 w-px bg-primary" style={{ left: pct(head) }}>
+          {/* the handle: a bigger target than it looks, and it swells while held */}
+          <span className={cn("pointer-events-auto absolute -top-px -left-[5px] size-[11px] rounded-full bg-primary transition-transform duration-150 before:absolute before:-inset-2 before:content-['']",
+            drag === null ? "cursor-grab hover:scale-125" : "scale-[1.35] cursor-grabbing")} />
+        </div>
       </div>
     </div>
   );
