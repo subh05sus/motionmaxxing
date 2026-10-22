@@ -198,6 +198,11 @@ Verify clean: the cut is ready, and the studio's page for the video shows it by 
 
 One fix cycle (the same chain), then show the user what is left.
 
+**An editor's version of the same take** (the user's own posted cut): `python3 "$PY" "$S/editor_cut.py" <source>
+<their cut> --edit edits/<name>` reads their kept pieces and every join from the audio and lists where ours differs
+(stretches only one keeps, starts that differ); the taste skill's `learn.py <raw> <posted> --edit edits/<name>` saves
+what it learns. A start that differs only by a fricative (the "Sch" of a word) is fine.
+
 ## 6. The user approves
 
 In the studio, the video's page (`http://localhost:5199/videos/<name>`) shows the cut, the raw take, the transcript with
@@ -237,4 +242,4 @@ ask for the edit. Never start the edit on your own.
 
 ## Self-check
 
-`test_build_timeline.py`, `test_retakes.py`, `test_media.py` (ffmpeg); `demo` on `transcribe.py`, `trend.py`, `splice_check.py`, `script_match.py`, `mirror.py`, `takes.py`, `rehear.py`.
+`test_build_timeline.py`, `test_retakes.py`, `test_media.py` (ffmpeg); `demo` on `transcribe.py`, `trend.py`, `splice_check.py`, `script_match.py`, `mirror.py`, `takes.py`, `rehear.py`, `editor_cut.py`.

@@ -18,6 +18,8 @@ reused on a re-run. The words are lined up, then it measures:
   FALSE CUTS words the posted cut kept that our default cut removes (fillers, earlier takes, alternate
              hooks). Each one is a good take our first edit would destroy.
   missed     words the posted cut removed that our default cut keeps (their taste we do not cut yet)
+  pieces     (two video files, the venv python) the editor's kept pieces and every join to the frame, from the audio
+             (cut skill's editor_cut.py); with --edit, where that edit's cut differs from the editor's
 
 Writes learn.json in --out, a row with the false cuts in $MM_HOME/metrics.jsonl (the cut skill's
 `trend.py tally` shows the trend), then the settings into the user's taste with the counts as the rule text
@@ -353,6 +355,7 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--engine", default=None, help="transcribe.py engine (default: whisper.cpp on the GPU)")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--edit", default=None, help="an edit of the same take to compare with the posted cut (decisions.json)")
     a = ap.parse_args()
     out = Path(a.out or Path("edits") / f"learn-{Path(a.raw).stem.lower()}")
     out.mkdir(parents=True, exist_ok=True)
@@ -363,6 +366,20 @@ def main():
     from mm import lang
     retakes.use_lang(lang.of(out))   # the take's language: its fillers, restarts and numbers
     m, saved = learn(raw, pub, a.dry_run, sil_raw, sil_pub)
+    media = not a.raw.lower().endswith(".json") and not a.posted.lower().endswith(".json")
+    if media:
+        try:
+            import editor_cut   # numpy: the venv python
+        except ImportError:
+            print("pieces     not measured: run with the venv python (~/.motionmaxxing/venv/bin/python) for the editor's pieces")
+        else:
+            m["pieces"], m["joins"] = editor_cut.run(a.raw, a.posted, raw, pub)
+            print(f"pieces     {len(m['pieces'])} kept pieces and {len(m['joins'])} joins read from the audio "
+                  "(learn.json 'pieces', 'joins')")
+            if a.edit:
+                v = m["vs_cut"] = editor_cut.versus(m["pieces"], json.loads((Path(a.edit) / "decisions.json").read_text(encoding="utf-8")))
+                print("vs cut     ours only: " + (", ".join(f"{x:.2f}-{y:.2f}" for x, y in v["only_ours"]) or "nothing")
+                      + "; the editor's only: " + (", ".join(f"{x:.2f}-{y:.2f}" for x, y in v["only_editor"]) or "nothing"))
     (out / "learn.json").write_text(json.dumps({**m, "saved": saved}, indent=1), encoding="utf-8")
     if not a.dry_run:
         trend.append(Path(a.raw).stem.lower(), raw[-1]["end"], pub[-1]["end"], m["false_cuts"]["words"], source="learn")
