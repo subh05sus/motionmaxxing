@@ -259,6 +259,23 @@ def card_items(ctx, media, render):
             items.append({"i": i, "kind": "image", "path": out, "start_f": f0, "len_f": max(1, f1 - f0),
                           "rect": rect, "name": name})
             continue
+        anim = c.get("anim") or {}
+        clip = (anim.get("props") or {}).get("src") if anim.get("type") == "video_card" else None
+        if clip and (edit / clip).exists():
+            # a motion clip or a recording is a finished video already: trimmed from where the card plays it and
+            # scaled to its box by ffmpeg, never rendered again frame by frame (18 motion clips took hours that way)
+            pr = anim["props"]
+            m = probe(edit / clip)
+            rect = box if c.get("layout") in ("background", "scene") else fit(pr.get("size") or [m["width"], m["height"]], box)
+            rect = [rect[0], rect[1], rect[2] // 2 * 2, rect[3] // 2 * 2]
+            f0, f1 = ctx["f"](c["start"]), ctx["f"](c["end"])
+            out = media / f"card-{i:02d}.mov"
+            if not (out.exists() and out.stat().st_mtime > ctx["plan_path"].stat().st_mtime):
+                ffmpeg("-ss", f"{pr.get('start_s') or 0:.3f}", "-t", f"{max(1, f1 - f0) / fps:.3f}", "-i", edit / clip, "-an",
+                       "-vf", f"fps={fps},scale={rect[2]}:{rect[3]}:flags=lanczos", "-c:v", "prores_ks", "-profile:v", "2",
+                       "-pix_fmt", "yuv422p10le", out)
+            items.append({"i": i, "kind": "video", "path": out, "start_f": f0, "len_f": max(1, f1 - f0), "rect": rect, "name": name})
+            continue
         a = max(0, round((c["start"] - LEAD_S) * fps))
         b = min(plan["durationInFrames"], round((c["end"] + TAIL_S) * fps))
         box[2], box[3] = box[2] // 2 * 2, box[3] // 2 * 2
