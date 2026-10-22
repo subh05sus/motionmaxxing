@@ -150,6 +150,7 @@ def report(d, expected, actual, removed, same, differ, gone, new, act=None, span
         print(f"\nMISSING ({len(missing)}), with the kept words around each:")
         for i, t in missing[:30]:
             print(f"  {t!r:14} ... {' '.join(expected[max(0, i - 4):i + 5])} ...")
+    heal_at = []   # source stretches the raw transcript got wrong: transcribe.py heal hears them again
     if survived:
         print(f"\nSURVIVED ({len(survived)}), heard in the render where nothing was expected [in brackets].")
         print("A real survivor is a repeat or a stumble. Clean speech here means the raw transcript misheard it:")
@@ -161,6 +162,7 @@ def report(d, expected, actual, removed, same, differ, gone, new, act=None, span
                     a, b = act[j1][1], act[j2 - 1][2]
                     sa, sb = to_source(a, spans), to_source(b, spans)
                     print(f"    cut {a:.2f}-{b:.2f}s = source {sa:.2f}-{sb:.2f}s")
+                    heal_at.append((max(0.0, sa - 3.0), sb + 3.0))
                     add = span_to_add(raw or [], sa, sb, rep["model_cuts"])
                     if add and "kept" in add:
                         print(f"    no span: it would also cut kept words ({add['kept'][:60]}). A word label is off,"
@@ -193,6 +195,10 @@ def report(d, expected, actual, removed, same, differ, gone, new, act=None, span
         print(f"\nSPOT-CHECK {len(check)} judgement call(s):")
         for c in check:
             print(f"  {c['start']:7.2f}s [{c['kind']}] {c['evidence'][:60]!r}")
+    if heal_at:
+        print(f"\nHEAL first (the raw transcript wrote these stretches wrong, so the cut could not see them): "
+              f"python3 transcribe.py heal {d} --ranges " + ",".join(f"{a:.1f}-{b:.1f}" for a, b in heal_at)
+              + "\nthen retakes.py propose, fix spans.json, build, render and verify again (one round).")
     print("\nOK: the render matches the intended cut." if not (missing or survived) else "")
     return 1 if (missing or survived) else 0
 

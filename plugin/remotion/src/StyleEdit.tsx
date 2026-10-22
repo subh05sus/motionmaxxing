@@ -47,7 +47,9 @@ export type Card = {
   marks?: Mark[]; // capture marks, rects in image px (references/motion.md)
   format?: "shot" | "browser" | "sticker" | "plain"; // how an image card is drawn (default shot); plain = the old flat capture
   props?: Record<string, unknown>; // extra props for the format: url, label, crop, rotate, zoom, cursor
-  layout?: "scene" | "box"; // scene: a full-frame cut-away on the look's ground (Scene.tsx)
+  layout?: "scene" | "box" | "split" | "background"; // scene: a full-frame cut-away on the look's ground (Scene.tsx);
+  // background: the picture fills the frame behind the speaker's cutout (matte.py), the speaker stays in front
+  panel?: boolean; // split layout, per beat: this card opens the panel (plan.py marks them; older plans: every card)
   transition_in?: Transition; // scene only: match | iris | push | block | wipe | fade | cut
   transition_out?: Transition;
   focus?: [number, number]; // scene only: where match / iris open from, % of the frame (the face)
@@ -256,8 +258,10 @@ type Slot = { card: Card; prev?: Card; next?: Card; from: number; to: number; co
 
 /** When each card is on screen and which neighbours it swaps with. Split: cards closer than BRIDGE_S share
  *  one open panel; the last card of a run stays until the panel has closed over it. */
-const slots = (cards: Card[], split: boolean): Slot[] => {
-  const gap = split ? BRIDGE_S : SWAP_S;
+const marked = (cards: Card[]) => cards.some((c) => c.panel !== undefined);
+const inPanel = (c: Card, cards: Card[]) => (marked(cards) ? !!c.panel : c.layout !== "scene" && c.layout !== "background");
+
+const slots = (cards: Card[], splitAll: boolean): Slot[] => {
   const lanes = new Map<string, Card[]>();
   for (const c of cards) lanes.set(c.lane ?? "", [...(lanes.get(c.lane ?? "") ?? []), c]);
   const out: Slot[] = [];
@@ -266,10 +270,12 @@ const slots = (cards: Card[], split: boolean): Slot[] => {
     lane.forEach((c, i) => {
       if (c.layout === "scene") {
         const nx = lane[i + 1];
-        const held = nx && nx.layout === "scene" && nx.start - c.end < gap; // the next scene grows over this one
+        const held = nx && nx.layout === "scene" && nx.start - c.end < (splitAll ? BRIDGE_S : SWAP_S); // the next scene grows over this one
         out.push({ card: c, next: held ? nx : undefined, covered: false, from: c.start, to: held ? nx.start + 1 : c.end + 0.05 });
         return;
       }
+      const split = splitAll && inPanel(c, cards);   // per beat: only panel cards keep the panel's timing
+      const gap = split ? BRIDGE_S : SWAP_S;
       const prev = i > 0 && c.start - lane[i - 1].end < gap ? lane[i - 1] : undefined;
       const next = i + 1 < lane.length && lane[i + 1].start - c.end < gap ? lane[i + 1] : undefined;
       const covered = split && !next;
@@ -283,7 +289,7 @@ const slots = (cards: Card[], split: boolean): Slot[] => {
 /** How far the split panel is open, 0 (speaker full frame) to 1 (split), from the runs of cards. */
 const panelOpen = (t: number, cards: Card[]) => {
   const runs: [number, number][] = [];
-  for (const c of [...cards].filter((c) => c.layout !== "scene").sort((a, b) => a.start - b.start)) {
+  for (const c of [...cards].filter((c) => inPanel(c, cards)).sort((a, b) => a.start - b.start)) {
     const last = runs[runs.length - 1];
     if (last && c.start - last[1] < BRIDGE_S) last[1] = Math.max(last[1], c.end);
     else runs.push([c.start, c.end]);
@@ -347,6 +353,49 @@ const LetterboxView: React.FC<Letterbox & { video: string; captions: Plan["capti
   );
 };
 
+/** A background card: the picture or clip fills the frame behind the speaker's cutout. It fades in and out, and a
+ *  still drifts in a little so it never sits dead. A picture much wider than the frame (a screenshot of a page or an
+ *  app) is not cropped to a sliver: it sits whole across the top, over a blurred, darkened copy of itself that fills
+ *  the frame, so the speaker stands in front of the real thing and its words still read. */
+const Backdrop: React.FC<{ card: Card; t: number; top: number }> = ({ card, t, top }) => {
+  const { fps, width, height } = useVideoConfig();
+  const FADE = 0.35;
+  const a = Math.max(0, Math.min(1, (t - card.start) / FADE, (card.end - t) / FADE));
+  const p = Math.max(0, Math.min(1, (t - card.start) / Math.max(0.1, card.end - card.start)));
+  const video = /\.(mp4|mov|m4v|webm)$/i.test(card.src ?? "");
+  const from = Math.round(card.start * fps);
+  const wide = !!card.size && card.size[0] / card.size[1] > (width / height) * 1.5;
+  const k = 1.06 - 0.06 * p;
+  if (!card.src) return null;
+  if (video) {
+    return (
+      <AbsoluteFill style={{ opacity: a, backgroundColor: "#000" }}>
+        <Sequence from={from} durationInFrames={Math.max(1, Math.round((card.end - card.start) * fps) + 1)} layout="none">
+          <OffthreadVideo src={staticFile(card.src)} muted style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        </Sequence>
+      </AbsoluteFill>
+    );
+  }
+  if (!wide) {
+    return (
+      <AbsoluteFill style={{ opacity: a, backgroundColor: "#000" }}>
+        <Img src={staticFile(card.src)} style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${k})` }} />
+      </AbsoluteFill>
+    );
+  }
+  const w = width * 0.94, h = (w * card.size![1]) / card.size![0];
+  return (
+    <AbsoluteFill style={{ opacity: a, backgroundColor: "#000", overflow: "hidden" }}>
+      <Img src={staticFile(card.src)} style={{ position: "absolute", inset: -width * 0.08, width: width * 1.16, height: height + width * 0.16,
+        objectFit: "cover", filter: "blur(36px) brightness(0.55) saturate(1.2)" }} />
+      <div style={{ position: "absolute", left: (width - w) / 2, top: (top / 100) * height, width: w, height: h, borderRadius: width * 0.03,
+        overflow: "hidden", boxShadow: "0 30px 80px -30px rgba(0,0,0,0.6)", transform: `scale(${k})`, transformOrigin: "50% 0%" }}>
+        <Img src={staticFile(card.src)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+      </div>
+    </AbsoluteFill>
+  );
+};
+
 export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layout, look: lookIn, motion, cutouts, pans, cover, texts, grade }) => {
   const frame = useCurrentFrame();
   const { fps, width, height, durationInFrames } = useVideoConfig();
@@ -385,10 +434,16 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
       light={split} look={look} m={m} fonts={fonts} ground={grounds.get(s.card)} />
   );
   // Box cards sit under the speaker's window in split; scenes cut away from everything, so they go on top.
-  const cardViews = up.filter((s) => s.card.layout !== "scene" && s.card.layer !== "behind").map(view);
-  const behindViews = up.filter((s) => s.card.layer === "behind").map(view);
+  const o = split && layout ? panelOpen(t, cards) : 0;
+  const panelUp = (c: Card) => split && inPanel(c, cards);
+  const backdrops = up.filter((s) => s.card.layout === "background").map((s) => (
+    <Backdrop key={`bg${s.card.src}${s.card.start}`} card={s.card} t={t} top={(s.card.box?.[1] ?? 0) || 13.1} />));
+  const behindViews = up.filter((s) => s.card.layer === "behind" && s.card.layout !== "background").map(view);
   const sceneViews = up.filter((s) => s.card.layout === "scene").map(view);
-  if (!split || !layout) {
+  // The whole frame: the overlay layout, and the split layout while its panel is closed (boxes, cards behind the
+  // speaker and backgrounds play over the full frame between the beats that open the panel).
+  if (!split || !layout || o === 0) {
+    const cardViews = up.filter((s) => s.card.layout !== "scene" && s.card.layer !== "behind" && !panelUp(s.card)).map(view);
     const pan = panAt(t, pans);
     const zm = zoomAt(t, zooms);
     const cam: React.CSSProperties = { transform: `translateX(${footageX(t, cards, width, m) + (pan.x / 100) * width}px) scale(${zm.k * pan.k})`,
@@ -399,6 +454,7 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
           {video ? <OffthreadVideo src={staticFile(video)} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
         </AbsoluteFill>
         {cover ? <CoverView c={cover} t={t} dur={durationInFrames / fps} m={m} width={width} height={height} /> : null}
+        {backdrops}
         {behindViews}
         {/* the speaker over the behind cards, on the footage's own move, only while one is up */}
         {(cutouts ?? []).filter((c) => frame >= c.from && frame <= c.to).map((c) => (
@@ -418,7 +474,7 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
   }
   // Split. The art sits still on the ground; the speaker's window slides down to uncover it and back up
   // to cover it, one move on one curve. The video inside moves with it so the head stays framed.
-  const o = panelOpen(t, cards);
+  const cardViews = up.filter((s) => s.card.layout !== "scene" && s.card.layer !== "behind" && s.card.layout !== "background").map(view);
   const { scale, x, y, origin } = layout.speaker;
   const top = (layout.seam / 100) * height * o;
   const k = 1 + (scale - 1) * o;

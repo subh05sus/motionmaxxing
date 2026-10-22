@@ -144,7 +144,7 @@ export async function poster(id: string): Promise<string | undefined> {
 
 export interface PlanSummary {
   width: number; height: number; duration: number;
-  cards: { start: number; end: number; label: string; kind: string; place: "scene" | "split" | "box" | "behind" }[];
+  cards: { start: number; end: number; label: string; kind: string; place: "scene" | "split" | "box" | "behind" | "background" }[];
   captions: { start: number; end: number; text: string }[];
   zooms: { start: number; end: number; scale: number }[];
   sounds: { t: number; name: string }[];
@@ -160,7 +160,8 @@ export function plan(id: string): PlanSummary | null {
     width: p.width, height: p.height, duration: (p.durationInFrames ?? 0) / (p.fps || 30),
     cards: (p.cards ?? []).map((c: any) => ({
       start: c.start, end: c.end, label: String(label(c)).slice(0, 40), kind: c.format || c.anim?.type || (c.src ? "picture" : "card"),
-      place: c.layer === "behind" ? "behind" : c.layout === "scene" ? "scene" : c.layout === "split" || p.layout?.mode === "split" ? "split" : "box",
+      place: c.layout === "background" ? "background" : c.layer === "behind" ? "behind" : c.layout === "scene" ? "scene"
+        : c.panel === true || (c.panel === undefined && p.layout?.mode === "split") || c.layout === "split" ? "split" : "box",
     })),
     captions: (p.captions?.chunks ?? []).map((c: any) => ({ start: c.start, end: c.end, text: c.text })),
     zooms: (p.zooms ?? []).map((z: any) => ({ start: z.start, end: z.end, scale: z.scale })),

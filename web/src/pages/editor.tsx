@@ -15,7 +15,7 @@ interface Word { i: number; text: string; start: number; end: number; kept: bool
 interface Note { id: string; t: number; text: string; stage: string; at: string; sent?: string }
 interface PlanSummary {
   width: number; height: number; duration: number;
-  cards: { start: number; end: number; label: string; kind: string; place: "scene" | "split" | "box" | "behind" }[];
+  cards: { start: number; end: number; label: string; kind: string; place: "scene" | "split" | "box" | "behind" | "background" }[];
   captions: { start: number; end: number; text: string }[];
   zooms: { start: number; end: number; scale: number }[];
   sounds: { t: number; name: string }[];
@@ -29,10 +29,11 @@ interface Detail extends VideoSummary {
 
 /** Where a visual sits, as a colour on the timeline. */
 const PLACE: Record<PlanSummary["cards"][number]["place"], { label: string; cls: string }> = {
+  background: { label: "Behind you (cut out)", cls: "bg-[#ff9f0a]/80" },
   scene: { label: "Full screen", cls: "bg-[#bf5af2]/70" },
   split: { label: "Half the screen", cls: "bg-[#64d2ff]/65" },
   box: { label: "Small box", cls: "bg-[#30d158]/60" },
-  behind: { label: "Behind you", cls: "bg-[#ff9f0a]/70" },
+  behind: { label: "Tucked behind your hair", cls: "bg-[#ffd60a]/60" },
 };
 
 const KIND: Record<string, string> = { retake: "Retake", false_start: "False start", filler: "Filler", meta: "Talking to yourself", audio_event: "Sound", redundant: "Said again", alt_hook: "Other hook", manual: "Your cut", silence: "Pause" };

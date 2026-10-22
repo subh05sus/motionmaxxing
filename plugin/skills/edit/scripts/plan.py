@@ -106,7 +106,7 @@ ANIMS = tuple(dict.fromkeys(TEMPLATES + OVERLAYS + LEGACY))
 # the look's ground. "split": the split layout's top panel. "box": a card over the footage, only for these.
 BOX_OK = ("logo", "logo_sting", "arrow_callout", "caption_page")
 SPLIT_FIRST = ("icon_burst",)    # scene or split: split keeps the speaker in shot
-LAYOUTS = ("scene", "split", "box")
+LAYOUTS = ("scene", "split", "box", "background")
 SCENE_BOX = [0, 0, 100, 100]            # "use the scene box" (the renderer's, clear of the app's UI)
 SCENE_TYPE_BOX = {True: [14, 14, 72, 52], False: [6, 9, 88, 70]}   # Scene.tsx sceneBox, vertical / wide: where it draws
 TRANSITIONS = ("match", "iris")         # renderer defaults: in, out
@@ -2298,6 +2298,12 @@ def lay_out(cards, aspect, face, style, split_ok):
         if f == "split" and not split_ok:
             f = "scene" if c.get("layout") == "split" else "box"   # no panel in overlay: a box, unless the beat asked for the panel
         c["_f"] = f
+        if f == "background":
+            # the speaker cut out (matte.py) in front of the picture, which fills the whole frame behind him
+            c["layout"], c["layer"], c["box"] = "background", "behind", [0, 0, 100, 100]
+            c["start"] = round(max(0.0, prev_end.get(c.get("lane"), 0.0), c["start"] - OVERLAY_LEAD_S * MOTION_K.get(pick_motion(style), 1.0)), 3)
+            prev_end[c.get("lane")] = c["end"]
+            continue
         if f == "scene":
             cyc = scene_cycle(style)
             tin = c.get("transition_in") or (cyc[n % len(cyc)] if cyc else TRANSITIONS[0])
@@ -2427,23 +2433,76 @@ def page_tall(chunks):
                + [2 * 1.14 * 1.25 for c in chunks if c.get("lines") == 2])
 
 
+ZOOM_ROOM = 1.3       # captions over the head leave room for a punch this big (the head grows up from the eyes)
+PANEL_RUN_S = 1.2     # panel cards closer than this share one opening (StyleEdit.tsx panelOpen)
+BOX_SHARE_MAX = 0.4   # at most this share of the visuals in a small box (check.py plan FAILs more, from 4 visuals)
+
+
+def placement(c):
+    """Where a planned card sits: background (behind the cut-out speaker, full frame), split (half the screen),
+    scene (the whole screen), behind (a card tucked behind the hair) or box (a small card over the footage)."""
+    if c.get("layout") == "background":
+        return "background"
+    if c.get("panel") or c.get("layout") in ("scene", "split"):
+        return "split" if c.get("panel") else c["layout"]
+    return "behind" if c.get("layer") == "behind" else "box"
+
+
+def mix_note(cards):
+    """Says when small boxes carry the edit: the big placements are what make it look edited."""
+    big = [c for c in cards if c.get("lane") != "logo"]
+    boxes = [c for c in big if placement(c) in ("box", "behind")]
+    if len(big) >= 4 and len(boxes) > BOX_SHARE_MAX * len(big):
+        print(f"warning: {len(boxes)} of {len(big)} visuals are small boxes (at most {BOX_SHARE_MAX:.0%}): give the big "
+              "ones \"layout\": \"background\" (behind the speaker, cut out), \"split\" (half the screen) or \"scene\" "
+              "(the whole screen) in visuals.json; check.py plan FAILs it", file=sys.stderr)
+
+
 def caption_under_chin(cap, face, aspect, above=False, tall=1.0):
-    """Captions never on the face. A vertical caption line that falls inside the head (face.json, the median head
-    over the take) moves to the head box's bottom edge, the chin line just below the mouth, held inside the safe
-    zone (its ink above y 1440); with above (the creator's captions sit over her face), to just over the head
-    when that is inside the safe zone. Changes cap["y_pct"]; returns the chin line (% down) when it moved under
-    the chin, else None."""
+    """Captions never on the face, and always inside the app's safe zone. A vertical caption line whose ink would
+    touch the head (face.json, the median head over the take, hair to chin) moves, in this order:
+      1. fully under the chin, when the line fits there above the app's bottom UI;
+      2. over the head, with room for a punch-in (the head grows up from the eyes), when that is inside the top
+         safe line (also first when the creator's own captions sit over her face: above);
+      3. neither fits (a head filling the frame): the bottom safe line, and check.py plan says so.
+    Changes cap["y_pct"] (and sets cap["over_head"] in 2); returns the chin line (% down) when it went under the
+    chin, else None."""
     hm = aspect == "9:16" and heads_median(face)
-    if not hm or not hm[0] - 2 < cap["y_pct"] < hm[1]:
+    half = CAP_GLYPH * (cap.get("size_pct") or 4.4) * tall
+    if not hm or not hm[0] - 2 * half - 0.6 < cap["y_pct"] < hm[1] + half + 0.6:
         return None
-    half = CAP_GLYPH * (cap.get("size_pct") or 4.4)
+    top_safe, floor = SAFE[aspect][1], 100 - SAFE[aspect][3]
     cap["off_face_from"] = cap["y_pct"]   # style_check.py: moved off the face on purpose, not a mismatch
-    if above and hm[0] - 0.6 - 2 * half * tall >= SAFE[aspect][1]:
-        cap["y_pct"] = round(hm[0] - 0.6 - half * tall, 1)   # the tallest page clears the head
+    chin = hm[1] - CHIN_SHARE * (hm[1] - hm[0])
+    under = chin + 0.6 + half
+    rise = EYES_SHARE * (hm[1] - hm[0]) * (ZOOM_ROOM - 1)
+    over = hm[0] - rise - 0.6 - half
+    if (above or under + half > floor) and over - half >= top_safe:
+        cap["y_pct"], cap["over_head"] = round(over, 1), True
         return None
-    lowest = 100 - SAFE[aspect][3] - half
-    cap["y_pct"] = round(min(hm[1] + 0.6, lowest), 1)
-    return hm[1]
+    if under + half <= floor:
+        cap["y_pct"] = round(under, 1)
+        return chin
+    cap["y_pct"] = round(floor - half, 1)   # no room either way: check.py plan FAILs captions on the face
+    return chin
+
+
+def clear_hair(zooms, face, cap):
+    """Captions over the head: each punch grows from the eyes, held so the top of the head stays under the captions'
+    ink; one held under 1.02 is dropped."""
+    bottom = cap["y_pct"] + CAP_GLYPH * (cap.get("size_pct") or 4.4) + 0.6
+    out = []
+    for z in zooms:
+        hd = head_during(face["heads"], face.get("step_s", 0.5), z["start"], z["end"])
+        want = z.pop("want", z["scale"])
+        if not hd:
+            out.append(z)
+            continue
+        eyes = hd[1] + EYES_SHARE * (hd[3] - hd[1])
+        k = min(want, (eyes - bottom) / max(0.1, eyes - hd[1]), 100 / max(1, hd[2] - hd[0]))
+        if k >= 1.02:
+            out.append({**z, "scale": round(k, 3), "origin": [(z.get("origin") or [50, 30])[0], round(eyes, 1)]})
+    return out
 
 
 def clear_chin(zooms, face, cap):
@@ -2586,7 +2645,9 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
             fit = round(min(100 / max(1, hd[2] - hd[0]), (100 - hd[1]) / max(1, hd[3] - hd[1])), 2)
             if z["scale"] > fit:
                 z["want"], z["scale"] = z["scale"], max(1.0, fit)
-    if chin is not None and not split_now:
+    if face and cap.get("over_head"):
+        zooms = clear_hair(zooms, face, cap)
+    elif chin is not None:
         zooms = clear_chin(zooms, face, cap)
     for z in zooms:
         z.pop("want", None)
@@ -2598,21 +2659,42 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
               file=sys.stderr)
     zooms = clear_entrances(zooms, cards)
     scenes = [c for c in cards if c["_f"] == "scene"]
-    rest = [c for c in cards if c["_f"] != "scene"]
+    bgs = [c for c in cards if c["_f"] == "background"]
+    rest = [c for c in cards if c["_f"] not in ("scene", "background")]
+    over_y = cap["y_pct"]   # where captions sit while the speaker has the whole frame
+    panel, per_beat = [], False
+    if split_now and (lay.get("variant") == "cutout" or explicit == "split" and not any(c["_f"] == "split" for c in rest)
+                      and not bgs and not any(c.get("layer") == "behind" for c in rest)):
+        panel, rest = rest, []   # the whole-video split (a 50/50 style): every card in the panel, as before
+    elif split_now:
+        per_beat = True
+        # Per beat: only the beats that asked for half the screen open the panel; boxes, cards behind the speaker
+        # and backgrounds play over the whole frame while it is closed. A box inside a run of panel cards joins it.
+        panel = [c for c in rest if c["_f"] == "split"]
+        runs = [(c["start"] - PANEL_RUN_S, c["end"] + PANEL_RUN_S) for c in panel]
+        inside = [c for c in rest if c["_f"] != "split" and c.get("layer") != "behind"
+                  and any(a < c["end"] and c["start"] < b for a, b in runs)]
+        panel += inside
+        rest = [c for c in rest if c["_f"] != "split" and not any(c is x for x in inside)]
     if split_now:
+        if per_beat:
+            # "half the screen" means half: a measured panel seam (a creator's graphics zone) is for a whole-video split
+            seam = max(seam, SPLIT["seam"])
+            split_y = min(seam + SPLIT_CAP_BELOW, 100 - bottom - 4)
         art = split_art_box(seam)
-        full_y = cap["y_pct"]   # where captions sit while the speaker has the whole frame
         cap["y_pct"] = split_y
         # a logo is dropped while a scene or a panel card is up (the frame is already showing the visual)
-        rest = split_cards(rest + [{**c, "lane": None} for c in scenes], art)
-        rest = readable_captures([c for c in rest if c.get("_f") != "scene"], aspect, pictures_only(style))
+        panel = split_cards(panel + [{**c, "lane": None} for c in scenes], art)
+        panel = readable_captures([c for c in panel if c.get("_f") != "scene"], aspect, pictures_only(style))
         if lay.get("face_every_s"):
-            rest = face_every(rest, float(lay["face_every_s"]))
+            panel = face_every(panel, float(lay["face_every_s"]))
         out = {**head, "layout": {"mode": "split", "ground": lay["ground"], "seam": seam, "art": art,
                                   "speaker": speaker_frame(face, seam, -(CUTOUT_BREAKOUT - 2) if lay.get("variant") == "cutout" else HEAD_ROOM),
-                                  "caption_full_y": full_y,
+                                  "caption_full_y": over_y,
                                   **({"variant": "cutout", "breakout": CUTOUT_BREAKOUT} if lay.get("variant") == "cutout" else {})}}
     else:
+        out = dict(head)
+    if rest:
         near = lambda c: c.get("lane") == "logo" and any(sc["start"] - 0.5 < c["end"] and c["start"] < sc["end"] + 0.5 for sc in scenes)
         for c in filter(near, rest):
             print(f"warning: the '{c['trigger_word']}' logo is within 0.5 s of a scene, dropped: end the scene sooner "
@@ -2623,13 +2705,23 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
         moved = {"zooms": zooms, "pans": place_pans((style.get("camera") or {}) if took(style, "pace") else {}, duration)}
         seen = face and {**face, "heads": [{**h, "box": on_screen(h["box"], h["t"], moved) if h.get("box") else None}
                                            for h in face["heads"]]}
-        rest = place_overlays(rest, seen, cap["y_pct"], aspect, graphics(style, "layout").get("layout"))
-        rest = avoid_heads(rest, seen, cap["y_pct"], aspect)
+        rest = place_overlays(rest, seen, over_y, aspect, graphics(style, "layout").get("layout"))
+        rest = avoid_heads(rest, seen, over_y, aspect)
         rest = readable_captures(rest, aspect, pictures_only(style))
         if (behind or any(c.get("layer") == "behind" for c in rest)) and not board:
             rest = tuck_behind(rest, face, aspect, every=behind)   # per beat: Claude picks behind where it fits
-        out = dict(head)
-    cards = clear_caption_paths(creator_motion(sorted(rest + scenes, key=lambda c: c["start"]), style, aspect), cap["y_pct"], aspect)
+    for grp, cs in (("over", rest), ("panel", panel), ("bg", bgs), ("scene", scenes)):
+        for c in cs:
+            c["_grp"] = grp
+    moved = creator_motion(sorted(rest + panel + bgs + scenes, key=lambda c: c["start"]), style, aspect)
+    cards = sorted(clear_caption_paths([c for c in moved if c["_grp"] == "over"], over_y, aspect)
+                   + clear_caption_paths([c for c in moved if c["_grp"] == "panel"], cap["y_pct"], aspect)
+                   + [c for c in moved if c["_grp"] in ("bg", "scene")], key=lambda c: c["start"])
+    for c in cards:
+        if per_beat:
+            c["panel"] = c["_grp"] == "panel"   # the renderer opens the panel for these beats only
+        c.pop("_grp", None)
+    mix_note(cards)
     for c in cards:
         px = c.get("layout") != "scene" and c.get("size") and capture_xh(c, aspect)
         if px and px < READ_XH and (aspect == "9:16" or c.get("format") == "sticker") and not pictures_only(style):
@@ -3435,12 +3527,20 @@ def demo():
     ag = anti_generic([{"kind": "title", "text": "New tool \U0001F929"}, {"kind": "anim", "type": "notes", "props": {"lines": [{"text": "ok \U0001F929"}]}}],
                       warn=lambda m: None)
     assert ag[0]["text"].endswith("\U0001F929") and ag[1]["props"]["lines"][0]["text"] == "ok", ag
-    # captions never on the face: a line inside the head moves to the chin line, inside the safe zone
+    # captions never on the face: a line on the head moves fully under the chin when it fits above the app's UI
     fc = {"step_s": 0.5, "heads": [{"t": i / 2, "box": [35, 31, 48, 41.5]} for i in range(9)]}
     cp = {"y_pct": 64, "size_pct": 4.4}
-    assert caption_under_chin(cp, fc, "9:16") == 72.5 and cp["y_pct"] == 73.1 <= 100 - SAFE["9:16"][3] - CAP_GLYPH * 4.4, cp
+    assert abs(caption_under_chin(cp, fc, "9:16") - 68.35) < 0.01 and cp["y_pct"] == 70.5, cp
+    assert cp["y_pct"] + CAP_GLYPH * 4.4 <= 100 - SAFE["9:16"][3], cp   # its ink inside the safe zone
     ca = {"y_pct": 40, "size_pct": 4.4}   # her captions sit over her face: ours go over the head, inside the safe zone
-    assert caption_under_chin(ca, fc, "9:16", above=True) is None and ca["y_pct"] == 28.9, ca
+    assert caption_under_chin(ca, fc, "9:16", above=True) is None and ca["y_pct"] == 23.3 and ca["over_head"], ca
+    # a close, low head (a phone take: hair at 41%, chin under the app's bottom UI): over the head, room for a punch
+    low = {"step_s": 0.5, "heads": [{"t": i / 2, "box": [15.6, 41.5, 65.2, 41.8]} for i in range(9)]}
+    cl = {"y_pct": 77, "size_pct": 3.83}
+    assert caption_under_chin(cl, low, "9:16") is None and cl["y_pct"] == 33.9 and cl["over_head"], cl
+    zl = clear_hair([{"start": 0, "end": 2, "scale": 1.2, "origin": [48, 41.5]}], low, cl)
+    assert zl and zl[0]["scale"] == 1.2 and zl[0]["origin"][1] == 60.3, zl   # grown from the eyes, hair under the captions
+    assert clear_hair([{"start": 0, "end": 2, "scale": 1.6, "origin": [48, 41.5]}], low, cl)[0]["scale"] < 1.32   # held
     assert above_face({"captions": {"y_pct": 38.6}, "face": {"y_pct": 48.9, "height_pct": 8.2}})
     assert not above_face({"captions": {"y_pct": 70}, "face": {"y_pct": 48.9, "height_pct": 8.2}})
     # her grade: a grey cut is pulled darker towards her luma; saturation of grey cannot be scaled, so it is held

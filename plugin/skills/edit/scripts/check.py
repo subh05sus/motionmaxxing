@@ -33,7 +33,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
-from plan import GAP_S, MIN_SHOW_S, QUIET_HOLD_S, card_gaps, INK_MIN_W, OVERLAY_EDGE, READ_XH, SAFE, capture_xh, explain_ink, clean, cut_lines, cut_points, head_during, overlay_led, small_lines, sticker_crop, words_only  # noqa: E402
+from plan import GAP_S, MIN_SHOW_S, QUIET_HOLD_S, card_gaps, INK_MIN_W, OVERLAY_EDGE, READ_XH, SAFE, capture_xh, explain_ink, clean, cut_lines, cut_points, head_during, overlay_led, small_lines, sticker_crop, words_only, CAP_GLYPH, CHIN_SHARE, BOX_SHARE_MAX, placement  # noqa: E402
 
 CENTRE_PLAN = 1.5      # % of the width a vertical card's box centre may sit off 50
 CENTRE_INK = 2.0       # % of the width a card's drawn content may sit off centre
@@ -208,7 +208,7 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
         x, y, w, h = c["box"]
         word = re.sub(r"[^\w'-]+", "", c["trigger_word"]).lower()
         if c.get("layout") == "scene" and beats is not None and c.get("scene_by") != "creator" and not any(
-                b.get("layout") in ("scene", "split") and re.sub(r"[^\w'-]+", "", b.get("word") or "").lower() == word for b in beats):
+                b.get("layout") in ("scene", "split", "background") and re.sub(r"[^\w'-]+", "", b.get("word") or "").lower() == word for b in beats):
             out.append(finding("FAIL", c["start"], f"{name} is a full-frame scene nobody asked for: the speaker leaves the frame",
                                "make it an overlay: plan again with no \"layout\": \"scene\" on that beat (a scene only when "
                                "the user asks for one)"))
@@ -304,6 +304,46 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
         elif tail > TAIL_S + 0.01:
             out.append(finding("FAIL", ch["start"], f"caption '{ch['text']}' held {tail:.2f} s past its last word",
                                "plan again with the current plan.py (it caps the tail at 0.3 s)"))
+    # The captions' ink: never on the face, and wholly inside the safe zone (the app's top bar, its caption and
+    # buttons at the bottom). The face is the head box less its neck margin, as drawn (zooms, pans, the split window).
+    half = CAP_GLYPH * (cap.get("size_pct") or 4.4)
+    lay = plan.get("layout") or {}
+    on_face, outside = [], []
+    for ch in plan["captions"]["chunks"] if aspect == "9:16" and lay.get("mode") != "letterbox" else ():
+        t = (ch["start"] + ch["end"]) / 2
+        if any(c.get("layout") in ("scene", "background") and c["start"] <= t < c["end"] for c in cards):
+            continue   # the speaker is not in the frame (a scene), or stands cut out in front of a picture
+        panel_up = lay.get("mode") == "split" and any((c.get("panel", c.get("layout") != "scene")) and c["start"] <= t < c["end"] for c in cards)
+        y = cap.get("y_pct") if panel_up or "caption_full_y" not in lay else lay["caption_full_y"]
+        if y is None:
+            continue
+        lines = max(1, math.ceil(len(ch["text"]) / 28)) if cap.get("words_per_caption", 3) > 2 else 1
+        a, b = y - half * lines, y + half * lines
+        if a < top - 0.05 or b > 100 - bottom + 0.05:
+            outside.append((ch["start"], ch["text"], a, b))
+        hd = heads and head_during(heads, step, ch["start"], ch["end"])
+        if hd and not panel_up:
+            face_b = hd[3] - CHIN_SHARE * (hd[3] - hd[1])
+            if a < face_b - 0.5 and b > hd[1] + 0.5:
+                on_face.append((ch["start"], ch["text"], hd))
+    if on_face:
+        t0, txt, hd = on_face[0]
+        out.append(finding("FAIL", t0, f"{len(on_face)} caption page(s) sit on the face ('{txt}' at {t0:.1f} s; face "
+                           f"{hd[1]:.0f}-{hd[3]:.0f}% down)", "plan again (plan.py puts them under the chin or over the head "
+                           "inside the safe zone); a hand-set captions.y_pct in style.json wins over that: remove it"))
+    if outside:
+        t0, txt, a, b = outside[0]
+        out.append(finding("FAIL", t0, f"{len(outside)} caption page(s) reach under the app's UI ('{txt}' ink {a:.0f}-{b:.0f}% "
+                           f"down; clear: {top}-{100 - bottom}%)", "plan again, or set captions.size_pct smaller in style.json"))
+    # The mix: small boxes are the quiet placement; the big ones (behind the speaker, half the screen, the whole
+    # screen) are what make it look edited. Logos are counted apart.
+    big = [c for c in cards if c.get("lane") != "logo"]
+    boxes = [c for c in big if placement(c) in ("box", "behind")]
+    if len(big) >= 4 and len(boxes) > BOX_SHARE_MAX * len(big):
+        out.append(finding("FAIL", None, f"{len(boxes)} of {len(big)} visuals are small boxes (at most {BOX_SHARE_MAX:.0%}): "
+                           "the edit reads as cards on a talking head", "give the big ones \"layout\": \"background\" (behind the "
+                           "speaker, cut out), \"split\" (half the screen) or \"scene\" (the whole screen) in visuals.json "
+                           "or images.json, then plan again (and matte.py for backgrounds)"))
     # Stretches with nothing changing: no card up, no zoom starting or ending, no jump cut.
     dur = plan["durationInFrames"] / plan["fps"]
     shown, lay = list(cards), plan.get("layout") or {}

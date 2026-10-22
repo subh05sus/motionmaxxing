@@ -97,18 +97,23 @@ rules, then the default look and motion (built animations over captures, big in 
 4. **Fetch:** `node "$S/capture.mjs" edits/<name>` fetches captures, logos, posts into `images/`, marks measured.
 5. **Motion:** moving-template beats become bespoke clips (motion skill); a failed clip keeps its card.
 
-**Where each visual sits: Claude picks per beat** (in visuals.json or images.json):
+**Where each visual sits: Claude picks per beat** (in visuals.json or images.json). The big placements make it look
+edited; a small box is the quiet one:
 
 | placement | write | fits |
 |---|---|---|
-| a small box over the footage | nothing (the default), or `"box": [x, y, w, h]` in % | a logo, a post, a capture's marked line while the face stays |
-| half the screen (9:16) | `"layout": "split"` | a page, a chart, b-roll: the visual on top, the speaker below |
-| the whole screen | `"layout": "scene"` | a demo recording, stock b-roll, a motion graphic that needs the room |
-| behind the speaker | `"layer": "behind"` | a big capture, a post or a clip that rises behind the head (the cutout, matte.py) |
+| behind the speaker, background removed | `"layout": "background"` | the speaker cut out (matte.py) in front of a picture or clip filling the frame: b-roll, a product, a page, a place. The host stays on screen |
+| half the screen (9:16) | `"layout": "split"` | a page or app to read, a chart, steps: the visual on top, the speaker in the window below. Only these beats open the panel |
+| the whole screen | `"layout": "scene"` | a motion graphic, a demo recording, a b-roll cut-away (1.5-4 s) |
+| a small box | nothing (the default), or `"box": [x, y, w, h]` in % | a logo, a post, a detail; above the head |
+| a card tucked behind the hair | `"layer": "behind"` with a box | a capture that rises behind the head |
 
-Mix them: the style's pace says how many, the line says which. Never the same placement more than three beats in a
-row; the face comes back at least every 8 s; a `scene` lasts 1.5-4 s. `"layer": "front"` keeps a card in front when
-the style puts cards behind.
+Rules: at most 40% of the visuals in a small box (logos apart); check.py plan FAILs more. At least one background and
+one half-screen beat in a video with four or more visuals, when the line fits. Never the same placement more than
+three beats in a row; the face comes back at least every 8 s. After a background beat (or a tucked card) is planned,
+run `matte.py` (it cuts only new frames). Captions: plan.py puts them under the chin, or over the head when the chin is
+too low for the app's bottom UI, always inside the safe zone; never set `captions.y_pct` by hand (check.py plan FAILs
+captions on the face or under the app's UI).
 
 **Real things, in this order:** the user's own image or clip; a capture of the real page with the line marked
 (`capture`); an X post (`post`); a Reddit thread or a news article (a `capture:browser` of the page with `marks` on

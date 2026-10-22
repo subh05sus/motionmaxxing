@@ -18,7 +18,7 @@ import { Kind, cutPhase } from "./ground";
 
 export type Transition = Kind;
 export type SceneCard = { anim?: Anim; src?: string; size?: [number, number]; marks?: Mark[];
-  highlight?: { rects: [number, number, number, number][] }; start: number; end: number; layout?: "scene" | "box";
+  highlight?: { rects: [number, number, number, number][] }; start: number; end: number; layout?: "scene" | "box" | "split" | "background";
   transition_in?: Transition; transition_out?: Transition; focus?: [number, number]; ground?: Ground;
   box: [number, number, number, number] };
 

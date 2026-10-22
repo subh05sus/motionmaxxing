@@ -79,14 +79,19 @@ Say the time first: about a third of the take's length (whisper.cpp, large-v3-tu
 took 1:25). The language is detected first (`--lang de` to set it). Never download a model mid-edit: a model that is not
 installed exits 4; run the setup skill.
 
-Whisper can write a line said twice in a row once (it reads its own earlier words as context, and repeats are the
-retakes). verify (step 4-5) hears the cut again and lists such a repeat under SURVIVED; then hear that stretch alone:
+Then, always, heal the transcript before deciding anything (about a minute):
 
 ```bash
-python3 "$PY" "$S/transcribe.py" refine edits/<name> <start> <end>     # 10 s pieces; patches words.raw.json
+python3 "$PY" "$S/transcribe.py" heal edits/<name>
 ```
 
-and run step 2 again on the new transcript.
+The first pass hears the whole take at once, which gives the steadiest word times but two faults the cut cannot see
+past: a line said twice in a row comes back once (Whisper reads its own words as context, and the repeats ARE the
+retakes), and a fast run of words gets stamped on one moment ("Du ziehst die Datei in" all at 143.66 s), so the cut
+keeps a 2-frame sliver and loses the words. heal hears the take again in 10 s pieces (verbatim) and takes those words
+wherever they are more or better timed, then spreads any word run still stamped on one moment over the voice around
+it. It prints each stretch it rewrote. Skipping it leaves hidden retakes in the cut (one take: "Schritt drei,
+bring" kept before the full "Schritt 3, bring ihm bei, wer du bist").
 
 **Never read `words.raw.json`**: step 2 writes `transcript.txt`, 1/12 the size.
 
@@ -161,7 +166,9 @@ python3 "$PY" "$S/verify_cut.py" edits/<name> --engine <same engine as step 1>
 
 Verify clean: the cut is ready, and the studio's page for the video shows it by itself. Verify diffs the cut's transcript with the kept words (exit 1 stops the chain):
 - **MISSING**: a kept word is not in the render. Raise `--pad` (or narrow the span), rebuild, re-render.
-- **SURVIVED**: a span to add for a real repeat or stumble, never one that cuts a kept line.
+- **SURVIVED**: verify prints a `HEAL first` line: run it (the stretches are heard again on their own), then step 2
+  (`retakes.py propose`) on the healed words, add the span for the real repeat or stumble, never one that cuts a kept
+  line, and run 3-5 again. That is the one fix cycle.
 - **HEARD DIFFERENTLY** ("lumo -> jeff") and filler notes are transcriber variance: no rebuild.
 - **DOUBLED**: words said twice in a row. Natural ("very, very"): keep. A stumble: add its span.
 - **N join(s) in speech**: listen. Clipped: `splice_check.py edits/<name> --fix`, re-render.

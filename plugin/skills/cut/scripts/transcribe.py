@@ -9,6 +9,11 @@
                                               hear one stretch of the take again on its own and patch words.raw.json
                                               when it holds more words (verify_cut's SURVIVED with "a word label is
                                               off": a repeat the first pass wrote once)
+    python transcribe.py heal <edit dir> [--ranges A-B,C-D] [--source <media>]
+                                              hear the take again in 10 s pieces (verbatim) and take those words where
+                                              the first pass was wrong: a retake it wrote once, words it squeezed into
+                                              a frame or two. --ranges adds stretches (source seconds) verify_cut heard
+                                              in the cut. Run it right after transcribing, before retakes.py propose.
     python transcribe.py demo                 self-check (no model needed)
 
 Engines:
@@ -465,12 +470,28 @@ def write(out, words, lang_code, engine):
     progress.step("Finding retakes and pauses", key=out.parent)
 
 
-def patch(words, start, end, new):
-    """words with the ones inside [start, end] replaced by `new` when `new` has more words; (words, replaced)."""
+def squeezed(ws):
+    """The words of a run that sit in a frame or two each: Whisper's times for them are not where they were said."""
+    ws = [w for w in ws if w.get("type", "word") == "word"]
+    out = []
+    for i, w in enumerate(ws):
+        near = [x for x in ws[max(0, i - 2):i + 3] if x is not w]
+        tight = w["end"] - w["start"] <= SQUEEZE_S
+        packed = sum(1 for x in near if abs(x["start"] - w["start"]) < SQUEEZE_S * 2) >= 2
+        if tight and (packed or any(x["end"] - x["start"] <= SQUEEZE_S and abs(x["start"] - w["end"]) < 0.1 for x in near)):
+            out.append(w)
+    return out
+
+
+def patch(words, start, end, new, times=False):
+    """words with the ones inside [start, end] replaced by `new` when `new` has more words, or (times) as many with
+    fewer squeezed into a frame or two; (words, replaced)."""
     toks = [w for w in words if w["type"] != "spacing"]
     inside = [w for w in toks if start <= (w["start"] + w["end"]) / 2 <= end]
     fresh = [w for w in new if start <= (w["start"] + w["end"]) / 2 <= end and w["type"] == "word"]
-    if sum(1 for w in fresh) <= sum(1 for w in inside if w["type"] == "word"):
+    n_new, n_old = len(fresh), sum(1 for w in inside if w["type"] == "word")
+    better = n_new > n_old or (times and n_new >= n_old > 0 and len(squeezed(fresh)) < len(squeezed(inside)))
+    if not better:
         return words, False
     keep = [dict(w, _win=0) for w in toks if not start <= (w["start"] + w["end"]) / 2 <= end]
     merged = sorted(keep + [dict(w, _win=1) for w in fresh], key=lambda w: w["start"])
@@ -499,9 +520,141 @@ def refine(edit, start, end, source=None):
         print(f"kept {start:.2f}-{end:.2f}s: hearing it alone found no more words")
 
 
+SQUEEZE_S = 0.04         # a word heard in this or less (with a neighbour as short) has times Whisper made up
+HEAL_WIN_S = 6.0         # the take compared with its verbatim hearing in windows this long, half overlapping
+HEAL_MORE = 2            # a window takes the verbatim words when they are this many more (a retake written once)
+
+
+def voiced(wav, frame_s=0.05):
+    """([bool] per frame_s: the voice is on, louder than the take's quiet floor by 12 dB), frame_s. Stdlib only."""
+    import array
+    import math
+    import wave
+    with wave.open(str(wav), "rb") as f:
+        rate, n = f.getframerate(), f.getnframes()
+        a = array.array("h", f.readframes(n))
+    step = max(1, int(rate * frame_s))
+    db = []
+    for i in range(0, len(a), step):
+        chunk = a[i:i + step:4]
+        e = sum(x * x for x in chunk) / max(1, len(chunk))
+        db.append(10 * math.log10(e + 1e-9))
+    floor = sorted(db)[int(0.3 * (len(db) - 1))] if db else 0
+    return [d > floor + 12 for d in db], frame_s
+
+
+def on_voice(w, voice, frame_s):
+    """The word sits where the voice is on (a word Whisper heard in a silence is made up)."""
+    i, j = int(w["start"] / frame_s), int(w["end"] / frame_s) + 1
+    return any(voice[max(0, i - 2):min(len(voice), j + 2)])
+
+
+def to_heal(words, verbatim, total, voice=None, frame_s=0.05):
+    """[(a, b)] windows where the verbatim hearing is better: clearly more words (a line said twice that the
+    whole-take pass wrote once), or as many with fewer squeezed into a frame or two (times Whisper made up)."""
+    ws = [w for w in words if w.get("type", "word") == "word"]
+    vs = [w for w in verbatim if w.get("type", "word") == "word" and (voice is None or on_voice(w, voice, frame_s))]
+    out, t = [], 0.0
+    while t < total:
+        a, b = t, min(total, t + HEAL_WIN_S)
+        old = [w for w in ws if a <= (w["start"] + w["end"]) / 2 < b]
+        new = [w for w in vs if a <= (w["start"] + w["end"]) / 2 < b]
+        if len(new) >= len(old) + HEAL_MORE or (len(new) >= len(old) > 0 and len(squeezed(new)) < len(squeezed(old))):
+            if out and a <= out[-1][1]:
+                out[-1] = (out[-1][0], b)
+            else:
+                out.append((a, b))
+        t += HEAL_WIN_S / 2
+    return out
+
+
+def unsqueeze(words, voice, frame_s=0.05):
+    """Words Whisper stamped on one moment ("Du ziehst die Datei in" all at 143.66 s) were said before or after it,
+    in the voiced audio between the word before and the word after. Spread each squeezed run over that voice, by
+    the words' lengths. -> (words, runs moved)."""
+    toks = [w for w in words if w.get("type") != "spacing"]
+    ws = [w for w in toks if w.get("type", "word") == "word"]
+    moved, i = 0, 0
+    while i < len(ws):
+        j = i
+        while j + 1 < len(ws) and ws[j + 1]["start"] - ws[i]["start"] <= SQUEEZE_S * 2 and ws[j]["end"] - ws[j]["start"] <= SQUEEZE_S * 2:
+            j += 1
+        run = ws[i:j + 1]
+        if len(run) >= 2:
+            lo = ws[i - 1]["end"] + 0.02 if i > 0 else 0.0
+            hi = ws[j + 1]["start"] - 0.02 if j + 1 < len(ws) else len(voice) * frame_s
+            frames = [k for k in range(int(lo / frame_s), min(len(voice), int(hi / frame_s) + 1)) if voice[k]]
+            # the voiced stretch between the neighbours (fast speech: 0.06 s a word is enough), else that whole gap
+            if frames and len(frames) * frame_s >= 0.06 * len(run):
+                a, b = frames[0] * frame_s, (frames[-1] + 1) * frame_s
+            elif hi - lo >= 0.1 * len(run):
+                a, b = lo, hi
+            else:
+                a = b = None
+            if a is not None:
+                total = sum(max(1, len(w["text"])) for w in run)
+                t = a
+                for w in run:
+                    d = (b - a) * max(1, len(w["text"])) / total
+                    w["start"], w["end"] = round(t, 3), round(t + d * 0.92, 3)
+                    t += d
+                moved += 1
+        i = j + 1
+    return with_spacing(sorted(toks, key=lambda w: w["start"])), moved
+
+
+def heal(edit, ranges=(), source=None):
+    """Hear the whole take again in 10 s pieces (verbatim, a minute or two) and take those words wherever they are
+    better; ranges (source seconds, verify_cut) are heard again on their own as well."""
+    edit = Path(edit)
+    raw = edit / "words.raw.json"
+    words = json.loads(raw.read_text(encoding="utf-8"))
+    meta = L.get_meta(edit)
+    code = meta.get("lang") or L.DEFAULT
+    src = Path(source) if source else next((edit / n for n in ("source.mp4", "joined.mp4") if (edit / n).exists()), None)
+    if not src:
+        sys.exit("ERROR: no source: pass --source <the raw take>")
+    if pick_engine("auto") != "whispercpp":
+        print("healed nothing: hearing again needs whisper.cpp (setup.py model)")
+        return 0
+    prompt = prompt_for(code, [])
+    with tempfile.TemporaryDirectory() as tmp:
+        wav = Path(tmp) / "a.wav"
+        extract_audio(src, wav)
+        total = wav_seconds(wav)
+        voice, fs = voiced(wav)
+        progress.step("Hearing the take again, word for word", key=str(edit))
+        verbatim = [w for w in cpp_pieces(wav, code, prompt, 0.0, total) if on_voice(w, voice, fs)]
+        todo = [(a, b, verbatim, "verbatim") for a, b in to_heal(words, verbatim, total, voice, fs)]
+        for a, b in ranges:
+            todo.append((a, b, [w for w in cpp_pieces(wav, code, prompt, a, b) if on_voice(w, voice, fs)], "heard in the cut"))
+    fixed = 0
+    for a, b, new, why in todo:
+        words, done = patch(words, a, b, new, times=True)
+        fixed += done
+        heard = " ".join(w["text"] for w in new if a <= (w["start"] + w["end"]) / 2 <= b)
+        print(f"{'healed' if done else 'kept  '} {a:7.2f}-{b:7.2f}s  {why:<16} {heard[:110]}")
+    words, moved = unsqueeze(words, voice, fs)
+    if moved:
+        print(f"timed   {moved} run(s) of words Whisper had stamped on one moment, spread over the voice around them")
+    if fixed or moved:
+        raw.write_text(json.dumps(words, indent=1, ensure_ascii=False), encoding="utf-8")
+    print(f"{fixed} of {len(todo)} stretch(es) rewritten, {moved} run(s) re-timed in {raw.name}" if fixed or moved
+          else "healed nothing: every stretch reads right")
+    return 0
+
+
 def main():
     if sys.argv[1:] == ["demo"]:
         return demo()
+    if sys.argv[1:2] == ["heal"]:
+        a = sys.argv[2:]
+        if not a:
+            sys.exit("usage: transcribe.py heal <edit dir> [--ranges A-B,C-D] [--source <media>]")
+        rg = a[a.index("--ranges") + 1] if "--ranges" in a else ""
+        ranges = [tuple(float(x) for x in r.split("-")) for r in rg.split(",") if "-" in r]
+        src = a[a.index("--source") + 1] if "--source" in a else None
+        return heal(a[0], ranges, src)
     if sys.argv[1:2] == ["refine"]:
         a = sys.argv[2:]
         if len(a) < 3:

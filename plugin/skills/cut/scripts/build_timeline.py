@@ -154,6 +154,9 @@ def edge(left, right, pad, from_left):
 # One frame at 30 fps is 33 ms, so padding cannot buy the room; leaving a little
 # more of the pause in front of it can.
 SHORT_WORD_S = 0.12
+SLIVER_FRAMES = 3        # a kept piece this short (or shorter) is dropped: no word fits in 0.1 s
+MIN_PIECE_S = 0.45       # a pause trim never leaves a kept piece shorter than this (it stays a pause instead)
+MAX_RESTORE_S = 0.8      # ... when that pause is at most this long
 RUNWAY_S = 0.25
 
 
@@ -391,6 +394,43 @@ def silence_cuts(words, gap_max, gap_keep, heard):
             out.append({"start": s, "end": e, "kind": "silence", "confidence": "high",
                         "evidence": f"{b - a:.2f}s silence", "note": f"tightened to {keep:.2f}s"})
     return out
+
+
+def keep_short_pieces(cuts, dur, min_piece=None, max_restore=None, words=()):
+    """A pause trimmed inside a sentence can leave a kept piece of one word ("So", then a 0.2 s trim, then the rest):
+    on screen a flash cut, in the audio a hiccup. Where a kept piece would be shorter than MIN_PIECE_S, the pause
+    trim beside it is dropped (the pause stays, at most MAX_RESTORE_S), the shorter one first. A short piece with no
+    word in it (words: the kept words) goes with the cuts around it instead. Cuts of mistakes, retakes and the
+    lead-in and tail are never dropped. -> (cuts, [(start, end)] of the pauses left in)."""
+    min_piece = MIN_PIECE_S if min_piece is None else min_piece
+    max_restore = MAX_RESTORE_S if max_restore is None else max_restore
+    cuts = sorted(cuts, key=lambda c: c["start"])
+    pause = lambda c: c["kind"] == "silence" and c.get("note") not in ("lead-in", "tail") and c["end"] != math.inf \
+        and c["end"] - c["start"] <= max_restore
+    restored = []
+    changed = True
+    while changed:
+        changed = False
+        for i in range(len(cuts) + 1):
+            a = cuts[i - 1]["end"] if i > 0 else 0.0
+            b = cuts[i]["start"] if i < len(cuts) else dur
+            if b - a >= min_piece or (i == 0 and a == 0.0 and b < min_piece and not cuts) or b <= a:
+                continue
+            if words and 0 < i < len(cuts) and not any(a <= (w["start"] + w["end"]) / 2 < b for w in words):
+                # nothing said in it: the two cuts around it become one
+                cuts[i - 1] = {**cuts[i - 1], "end": max(cuts[i - 1]["end"], cuts[i]["end"])}
+                del cuts[i]
+                changed = True
+                break
+            side = [k for k in (i - 1, i) if 0 <= k < len(cuts) and pause(cuts[k])]
+            if not side:
+                continue
+            k = min(side, key=lambda k: cuts[k]["end"] - cuts[k]["start"])
+            restored.append((cuts[k]["start"], cuts[k]["end"]))
+            del cuts[k]
+            changed = True
+            break
+    return cuts, restored
 
 
 def lead_trail_cuts(kept, dur, gap_keep):
@@ -716,6 +756,10 @@ def main():
         allcuts = carve(allcuts, keeps)
         print(f"keep       {len(keeps)} range(s) from keep.json left in: "
               + ", ".join(f"{a:.2f}-{b:.2f}s" for a, b in keeps[:5]))
+    allcuts, restored = keep_short_pieces(allcuts, dur, words=kept_words)
+    if restored:
+        print(f"pieces     {len(restored)} pause(s) left in, so no kept piece is under {MIN_PIECE_S:.2f}s: "
+              + ", ".join(f"{a_:.2f}-{b_:.2f}s" for a_, b_ in restored[:6]))
     if kept_words and allcuts and allcuts[-1]["end"] >= dur:   # let the last word ring out
         last = max(w["end"] for w in kept_words)
         allcuts[-1]["start"] = max(allcuts[-1]["start"], min(dur, last + END_TAIL_S))
@@ -731,6 +775,13 @@ def main():
         after = min([t["start"] for t in toks if t["start"] >= lc["end"]], default=dur)
         frames = lead_first(frames, round((before + lc["start"]) / 2 * fps), round((lc["end"] + after) / 2 * fps))
         print(f"lead       {lc['evidence'][:60]!r} plays first")
+    # A kept piece of 3 frames or less is never a word, whatever the labels say (Whisper squeezes a fast run of words
+    # into a frame or two): played, it is a click or half a syllable at a join. Dropped, after the joins have moved.
+    slivers = [(s_ / fps, e_ / fps) for s_, e_ in frames if e_ - s_ <= SLIVER_FRAMES]
+    if slivers and len(frames) > len(slivers):
+        frames = [f for f in frames if f[1] - f[0] > SLIVER_FRAMES]
+        print(f"slivers    {len(slivers)} kept piece(s) of {SLIVER_FRAMES} frames or less dropped: "
+              + ", ".join(f"{a_:.2f}-{b_:.2f}s" for a_, b_ in slivers[:6]))
     spans = [{"start": round(s / fps, 6), "end": round(e / fps, 6)} for s, e in frames]
     final = sum(s["end"] - s["start"] for s in spans)
 
