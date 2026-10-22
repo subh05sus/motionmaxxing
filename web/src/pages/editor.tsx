@@ -48,13 +48,13 @@ function timeMaps(kept: { start: number; end: number }[]) {
   for (const k of kept) { starts.push(acc); acc += k.end - k.start; }
   return {
     total: acc,
+    // the kept pieces are in play order, which is not always the take's (moves.json plays a later take earlier)
     toCut(t: number): number {
-      for (let i = 0; i < kept.length; i++) {
-        const k = kept[i]!;
-        if (t < k.start) return starts[i]!;
-        if (t <= k.end) return starts[i]! + (t - k.start);
-      }
-      return acc;
+      const i = kept.findIndex((k) => t >= k.start && t <= k.end);
+      if (i >= 0) return starts[i]! + (t - kept[i]!.start);
+      let next = -1;   // a cut word: where the next kept piece of the take plays
+      kept.forEach((k, j) => { if (k.start > t && (next < 0 || k.start < kept[next]!.start)) next = j; });
+      return next >= 0 ? starts[next]! : acc;
     },
     toSrc(c: number): number {
       for (let i = 0; i < kept.length; i++) {
