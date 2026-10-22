@@ -993,7 +993,7 @@ def anim_items(visuals, edit_dir=None, style=None):
             continue
         if v["type"] not in ("notes", "progress") and not drop_words_only([{"trigger_word": v.get("word"), "anim": v}], style or {}):
             continue   # notes and progress wait: take_frames gives them the take's frames once their times are known
-        item = {k: v[k] for k in ("word", "nth", "box", "entrance", "hold_s", "layout", "layer", "transition_in", "transition_out", "focus", "heading") if k in v}
+        item = {k: v[k] for k in ("word", "nth", "box", "entrance", "hold_s", "layout", "layer", "cutaway", "transition_in", "transition_out", "focus", "heading") if k in v}
         if "box" in v:
             item["_own_box"] = True
         item["anim"] = {"type": v["type"], "props": template_props(v["type"], v.get("props"))}
@@ -1121,7 +1121,7 @@ def _place(images, words, duration, hold, ent, box, aspect):
         card = {"src": im["src"]} if "src" in im else {"anim": im["anim"]}
         if im.get("lane"):
             card["lane"] = im["lane"]
-        for k in ("highlight", "size", "layout", "layer", "transition_in", "transition_out", "focus", "format", "props", "_own_box", "xh", "lines", "pics",
+        for k in ("highlight", "size", "layout", "layer", "cutaway", "transition_in", "transition_out", "focus", "format", "props", "_own_box", "xh", "lines", "pics",
                   "heading"):
             if im.get(k):
                 card[k] = im[k]
@@ -1142,6 +1142,7 @@ def _place(images, words, duration, hold, ent, box, aspect):
 
 
 HEAD_GAP = 2           # % kept between a card and the head (a zoom punch grows the head a little)
+CAP_CLEAR = 5          # % kept between a card and the captions' centre line (the glyphs reach about 2.3 either side)
 MIN_CARD_H = 9         # a card squeezed shorter than this above the head is dropped instead
 
 
@@ -1223,7 +1224,9 @@ def free_regions(hd, cap_y, aspect):
     left, htop, right, hbot = hd
     floor = min(cap_y - 5, 100 - b) if aspect == "9:16" else 100 - b
     side = max(l, r) if aspect == "9:16" else 4      # vertical: the centred band inside the safe zone
-    out = [[side, top, 100 - 2 * side, htop - HEAD_GAP - top]]
+    # captions over the head (plan.py over_y) sit in the band above it: a card there stops over them
+    above = min(htop - HEAD_GAP, cap_y - CAP_CLEAR) if cap_y < htop else htop - HEAD_GAP
+    out = [[side, top, 100 - 2 * side, above - top]]
     if aspect == "9:16":
         out += [[OVERLAY_EDGE, htop, left - HEAD_GAP - OVERLAY_EDGE, floor - htop], [right + HEAD_GAP, htop, 100 - r - (right + HEAD_GAP), floor - htop]]
         # below the chin, over the body: where most talking-head creators put a photo when the face fills the top.
@@ -1472,6 +1475,8 @@ def place_overlays(cards, face, cap_y, aspect, prefer=None):
             c["box"] = [0, 0, 100, 100]
             if hd:
                 c["anim"]["props"]["head"] = [round(hd[0], 1), round(hd[1], 1), round(hd[2] - hd[0], 1), round(hd[3] - hd[1], 1)]
+                if cap_y < hd[1]:   # captions over the head: the logos above the head stay above them (Overlays.tsx)
+                    c["anim"]["props"]["cap_top"] = round(cap_y - CAP_CLEAR / 2, 1)
             if aspect == "9:16":    # readable logos spread over a band centred on the frame, not round the head
                 c["anim"]["props"].setdefault("band", list(LOGO_BAND))
                 c["anim"]["props"].setdefault("size", LOGO_SIZE)
@@ -1691,10 +1696,11 @@ PANEL_T = 0.3          # the panel opens this long before a card lands (StyleEdi
 SPLIT_LOGO_S = 1.5     # a logo alone in the panel stays at least this long
 
 
-def split_art_box(seam):
-    """The part of the top panel clear of the app's UI and the seam: every split card fills it."""
+def split_art_box(seam, wide=False):
+    """The part of the top panel clear of the app's UI and the seam: every split card fills it. wide (a mixed edit's
+    half screen): the app's right rail of buttons starts below the top half, so both sides keep only the left margin."""
     l, t, r, _ = SAFE["9:16"]
-    m = max(l, r)       # equal side margins: the art is centred on the frame
+    m = l if wide else max(l, r)       # equal side margins: the art is centred on the frame
     return [m, t, 100 - 2 * m, seam - SPLIT_GAP - t]
 
 
@@ -2299,8 +2305,9 @@ def lay_out(cards, aspect, face, style, split_ok):
             f = "scene" if c.get("layout") == "split" else "box"   # no panel in overlay: a box, unless the beat asked for the panel
         c["_f"] = f
         if f == "background":
-            # the speaker cut out (matte.py) in front of the picture, which fills the whole frame behind him
-            c["layout"], c["layer"], c["box"] = "background", "behind", [0, 0, 100, 100]
+            # the speaker cut out (matte.py) in front of the picture, which fills the whole frame behind him; a cutaway
+            # ("cutaway": true on its beat) is the picture alone, full screen: no cutout, the speaker is off for its length
+            c["layout"], c["layer"], c["box"] = "background", "cutaway" if c.get("cutaway") else "behind", [0, 0, 100, 100]
             c["start"] = round(max(0.0, prev_end.get(c.get("lane"), 0.0), c["start"] - OVERLAY_LEAD_S * MOTION_K.get(pick_motion(style), 1.0)), 3)
             prev_end[c.get("lane")] = c["end"]
             continue
@@ -2681,7 +2688,7 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
             # "half the screen" means half: a measured panel seam (a creator's graphics zone) is for a whole-video split
             seam = max(seam, SPLIT["seam"])
             split_y = min(seam + SPLIT_CAP_BELOW, 100 - bottom - 4)
-        art = split_art_box(seam)
+        art = split_art_box(seam, wide=per_beat)
         cap["y_pct"] = split_y
         # a logo is dropped while a scene or a panel card is up (the frame is already showing the visual)
         panel = split_cards(panel + [{**c, "lane": None} for c in scenes], art)
@@ -3318,6 +3325,15 @@ def demo():
     close = {"step_s": 0.5, "heads": [{"t": float(i) / 2, "box": [28, 12, 44, 26]} for i in range(30)]}
     [lo] = place_overlays([dict(wide)], close, 52.6, "9:16")
     assert lo["box"][1] >= 52.6 + 5 and lo["box"][0] == SAFE["9:16"][2] and lo["box"][1] + lo["box"][3] <= 100 - SAFE["9:16"][3], lo["box"]
+    # captions over the head (one take: head top 40%, captions at 33.8%): a card above the head stops over
+    # them, and a logo cluster is told their top so its logos never frame or touch a word
+    low = {"step_s": 0.5, "heads": [{"t": float(i) / 2, "box": [30, 40, 40, 38]} for i in range(30)]}
+    [ab] = place_overlays([dict(wide)], low, 33.8, "9:16")
+    assert ab["box"][1] + ab["box"][3] <= 33.8 - CAP_CLEAR + 0.05, ab["box"]
+    [cl] = place_overlays([{**lc, "anim": {"type": "logo_cluster", "props": {}}}], low, 33.8, "9:16")
+    assert cl["anim"]["props"]["cap_top"] == 31.3, cl["anim"]["props"]
+    [cl] = place_overlays([{**lc, "anim": {"type": "logo_cluster", "props": {}}}], low, 68, "9:16")
+    assert "cap_top" not in cl["anim"]["props"], cl["anim"]["props"]
     # a capture that is mostly picture (a book cover with a small caption) is kept for the picture
     cover = {"src": "images/c.png", "size": [600, 800], "pics": [[20, 20, 560, 700]], "lines": [[40, 740, 300, 20]], "box": [14, 58, 72, 20]}
     assert picture_share(cover) > 0.8 and capture_xh(cover, "9:16") is None and readable_captures([cover], "9:16") == [cover]

@@ -340,7 +340,8 @@ const Toasts: React.FC<TP> = ({ p, w, h, m, fonts, dur }) => {
 
 // =====================================================================================================
 // logo_cluster: real logos pop around the speaker's head, bare with a soft shadow, staggered, bobbing.
-// props: logos: [{src, at?}], head? [x, y, w, h] % of the card box (plan.py fills it from face.json)
+// props: logos: [{src, at?}], head? [x, y, w, h] % of the card box (plan.py fills it from face.json),
+// cap_top? % of the frame: the captions' top when they sit over the head
 const LogoCluster: React.FC<TP> = ({ p, w, h, m, dur }) => {
   const u = Math.min(w, h) / 100;
   const logos: { src: string; at?: number }[] = (p.logos ?? []).slice(0, 6);
@@ -359,8 +360,10 @@ const LogoCluster: React.FC<TP> = ({ p, w, h, m, dur }) => {
     const x = band
       ? (n === 1 ? w / 2 : (band[0] / 100) * w + S / 2 + ((i / (n - 1)) * ((band[1] - band[0]) / 100) * w - (i / (n - 1)) * S))
       : Math.min(w * 0.84 - S / 2, Math.max(S * 0.6, cx + Math.cos(a) * R * 1.15)); // clear of the frame edge and the app rail
-    // in the band the big logos stay above the head: never lower than just over its top
-    const y = band ? Math.min(cy + Math.sin(a) * R * 1.05, (hy / 100) * h - S * 0.55) : cy + Math.sin(a) * R * 1.05;
+    // in the band the big logos stay above the head: never lower than just over its top, and over captions set
+    // above the head (props.cap_top, plan.py), never lower than just over them
+    const y = Math.min(band ? Math.min(cy + Math.sin(a) * R * 1.05, (hy / 100) * h - S * 0.55) : cy + Math.sin(a) * R * 1.05,
+      p.cap_top !== undefined ? (p.cap_top / 100) * h - S * 0.55 : Infinity);
     return [x, Math.max(h * (h > w ? 0.131 : 0.12) + S / 2, y), (r() - 0.5) * 16, r() * 6.28];   // vertical: the reels safe zone's top (plan.py SAFE)
   });
   const { U } = useFrame();

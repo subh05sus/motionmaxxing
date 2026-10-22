@@ -122,6 +122,31 @@ def footage_affine(t, plan, W, H):
     return [[s, 0, ox * (1 - s) + px / 100 * W], [0, s, oy * (1 - s)]]
 
 
+PANEL_T, BRIDGE_S = 0.3, 1.2   # StyleEdit.tsx: the panel opens over 2 x PANEL_T round a card's start; a gap under BRIDGE_S stays open
+
+
+def panel_at(t, plan):
+    """How open the split layout's panel is at t, 0 to 1 (StyleEdit.tsx panelOpen). A split style opens it for its
+    cards; a mixed edit (cards marked "panel") only for its half-screen beats, and between those the frame is the
+    overlay layout: the footage full frame, captions over the head, the cutout over behind cards."""
+    if (plan.get("layout") or {}).get("mode") != "split":
+        return 0.0
+    cards = plan["cards"]
+    marked = any("panel" in c for c in cards)
+    runs = []
+    for c in sorted((c for c in cards if (c.get("panel") if marked else c.get("layout") not in ("scene", "background"))),
+                    key=lambda c: c["start"]):
+        if runs and c["start"] - runs[-1][1] < BRIDGE_S:
+            runs[-1][1] = max(runs[-1][1], c["end"])
+        else:
+            runs.append([c["start"], c["end"]])
+
+    def io(a, b):   # Easing.inOut(Easing.cubic), 0 at a to 1 at b
+        x = min(1.0, max(0.0, (t - a) / (b - a)))
+        return 4 * x ** 3 if x < 0.5 else 1 - (2 - 2 * x) ** 3 / 2
+    return max([0.0] + [min(io(a - PANEL_T, a + PANEL_T), 1 - io(b - PANEL_T, b + PANEL_T)) for a, b in runs])
+
+
 def board_frame(t, lay):
     """The speaker's (zoom, side) at t from the board layout's face keyframes (Board.tsx keyed; smoothstep for its ease)."""
     z, sd = lay["face"][0][1], lay["face"][0][2]
@@ -251,7 +276,10 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
                                "the beat a \"crop\" round the evidence lines, or \"layout\": \"scene\""))
         if c.get("layout") != "scene" and not spread(c):   # a scene or a logo cluster: the renderer keeps it inside
             cl = OVERLAY_EDGE if aspect == "9:16" and overlay_led(c) else l   # plan.free_regions: beside the head
-            if x < cl - 0.05 or y < top - 0.05 or x + w > 100 - r + 0.05 or y + h > 100 - bottom + 0.05:
+            cr = r
+            if aspect == "9:16" and c.get("panel") and y + h <= 50.05:   # the half-screen panel, above the app's right rail
+                cl = cr = SAFE[aspect][0]                                  # (plan.split_art_box wide)
+            if x < cl - 0.05 or y < top - 0.05 or x + w > 100 - cr + 0.05 or y + h > 100 - bottom + 0.05:
                 out.append(finding("FAIL", c["start"], f"{name} card {[round(v, 1) for v in c['box']]} reaches under the app's UI "
                                    f"(safe: {l}% sides, {top}% top, {bottom}% bottom)",
                                    "drop its box in visuals.json/images.json (plan.py fits it), then plan again"))
@@ -311,9 +339,9 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
     on_face, outside = [], []
     for ch in plan["captions"]["chunks"] if aspect == "9:16" and lay.get("mode") != "letterbox" else ():
         t = (ch["start"] + ch["end"]) / 2
-        if any(c.get("layout") in ("scene", "background") and c["start"] <= t < c["end"] for c in cards):
-            continue   # the speaker is not in the frame (a scene), or stands cut out in front of a picture
-        panel_up = lay.get("mode") == "split" and any((c.get("panel", c.get("layout") != "scene")) and c["start"] <= t < c["end"] for c in cards)
+        if any(c.get("layout") == "scene" and c["start"] <= t < c["end"] for c in cards):
+            continue   # the speaker is not in the frame (a scene). Before a picture (background) he still is: his cutout
+        panel_up = panel_at(t, plan) >= 0.5
         y = cap.get("y_pct") if panel_up or "caption_full_y" not in lay else lay["caption_full_y"]
         if y is None:
             continue
@@ -630,7 +658,6 @@ def check_render(edit, plan, video):
     from plan import probe
     out, measured = [], {}
     split = (plan.get("layout") or {}).get("mode") == "split"
-    mode = "split" if split else "overlay"
     W, H = plan["width"] // 2, plan["height"] // 2
     cards = plan["cards"]
     m = probe(edit / plan["video"])
@@ -647,18 +674,20 @@ def check_render(edit, plan, video):
     for n, (t, frame) in enumerate(sampled(video, "null", W, H, fps)):
         cut = next(behind, (0, None))[1]
         up = [i for i, c in enumerate(cards) if c["start"] + 0.35 <= t <= c["end"] - 0.2]
-        if not up:
+        o = panel_at(t, plan)
+        if not up or 0 < o < 1:     # the window mid-move is neither layout: not measured
             continue
-        if split:
+        sp = o == 1                 # the panel open: the split geometry; shut (a mixed edit between its panels): the overlay one
+        if sp:
             bg = ground
         else:
             zm = np.float32(footage_affine(t, plan, W, H))
             bg = cv2.warpAffine(cut, zm, (W, H))
         diff = cv2.absdiff(cv2.GaussianBlur(frame, (5, 5), 0), cv2.GaussianBlur(bg, (5, 5), 0)).max(axis=2)
-        ink = cv2.morphologyEx((diff > INK_DIFF[mode]).astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        ink = cv2.morphologyEx((diff > INK_DIFF["split" if sp else "overlay"]).astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
         heads = []
         if n % 2 == 0:      # the head every 0.5 s. Overlay: from the cut itself, so a card on the face can't hide it
-            src = frame if split else bg
+            src = frame if sp else bg
             sw = facemod.SCAN_W
             sh = round(sw * H / W)
             if det is None:
@@ -666,16 +695,16 @@ def check_render(edit, plan, video):
             _, faces = det.detect(cv2.resize(src, (sw, sh)))
             for f in faces if faces is not None else []:
                 b = facemod.head_box(f[:4].tolist(), sw, sh)
-                if not split or b[1] + b[3] / 2 > plan["layout"]["seam"]:   # split: the speaker is in the window
+                if not sp or b[1] + b[3] / 2 > plan["layout"]["seam"]:   # split: the speaker is in the window
                     heads.append(b)
             heads = sorted(heads, key=lambda b: -b[2] * b[3])[:1]
         grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
-        al = None if split or not any(cards[i].get("layer") == "behind" for i in up) else cutout_alpha(edit, plan, t)
+        al = None if sp or not any(cards[i].get("layer") == "behind" for i in up) else cutout_alpha(edit, plan, t)
         person = None if al is None else cv2.warpAffine(cv2.resize(al, (W, H), interpolation=cv2.INTER_AREA), zm, (W, H)) > 230
         for i in up:
             c, st = cards[i], per[i]
             x0, y0, x1, y1 = pix(c["box"], 2)
-            if split:   # below the art box is the speaker's window and its shadow, never the card
+            if sp:   # below the art box is the speaker's window and its shadow, never the card
                 y1 = min(y1, int((c["box"][1] + c["box"][3]) / 100 * H))
             mask = np.zeros_like(ink)
             mask[y0:y1, x0:x1] = ink[y0:y1, x0:x1]
@@ -832,6 +861,14 @@ def style_note(path, style):
 
 def demo():
     import tempfile
+    # the panel (StyleEdit.tsx panelOpen): a mixed edit opens it only for its marked cards, across a short gap, and
+    # moves over 0.6 s; a split style opens it for every card but backgrounds and scenes
+    mixed = {"layout": {"mode": "split"}, "cards": [{"start": 10, "end": 12, "panel": True}, {"start": 12.8, "end": 14, "panel": True},
+                                                    {"start": 20, "end": 23, "panel": False, "layout": "background"}]}
+    assert panel_at(5, mixed) == 0 and panel_at(10, mixed) == 0.5 and panel_at(11, mixed) == 1 and panel_at(12.4, mixed) == 1
+    assert panel_at(14.3, mixed) == 0 and panel_at(21, mixed) == 0 and panel_at(11, {**mixed, "layout": {"mode": "overlay"}}) == 0
+    style = {"layout": {"mode": "split"}, "cards": [{"start": 2, "end": 4}, {"start": 8, "end": 9, "layout": "background"}]}
+    assert panel_at(3, style) == 1 and panel_at(8.5, style) == 0
     with tempfile.TemporaryDirectory() as d:   # a frame reader closed early leaves no ffmpeg noise behind
         v = Path(d) / "v.mp4"
         subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=64x64:r=30:d=3", "-pix_fmt", "yuv420p",

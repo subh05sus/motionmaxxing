@@ -340,10 +340,14 @@ def dedupe(found):
 def cream_ground(bgr):
     """Share of the crop in its one dominant colour when that colour is cream paper, else 0."""
     import numpy as np
-    q = (bgr >> 4).reshape(-1, 3).astype(np.int32)
-    keys, counts = np.unique(q[:, 0] * 256 + q[:, 1] * 16 + q[:, 2], return_counts=True)
+    px = bgr.reshape(-1, 3)
+    q = (px >> 4).astype(np.int32)
+    key = q[:, 0] * 256 + q[:, 1] * 16 + q[:, 2]
+    keys, counts = np.unique(key, return_counts=True)
     k = int(keys[counts.argmax()])
-    b, g, r = ((k >> 8) & 15) * 16 + 8, ((k >> 4) & 15) * 16 + 8, (k & 15) * 16 + 8
+    # the bin finds the dominant colour, its pixels' mean is the colour: a bin's centre turned a neutral near-white
+    # on a bin edge, (242, 242, 239), into a warm (248, 248, 232), "cream"
+    b, g, r = (px[key == k].mean(axis=0) + 0.5).astype(int)
     share = counts.max() / len(q)
     return share if share > 0.5 and is_cream(f"#{r:02x}{g:02x}{b:02x}") else 0.0
 
@@ -473,6 +477,9 @@ def demo():
     import cv2
     import numpy as np
     assert "tiktok sans" not in GROTESK, "the default plain captions' face is not a tell"
+    # a neutral near-white on a bin edge is not cream (it read as (248, 248, 232) from the bin's centre); cream paper is
+    flat = lambda bgr: np.full((40, 40, 3), bgr, np.uint8)
+    assert cream_ground(flat((239, 242, 242))) == 0.0 and cream_ground(flat((236, 248, 253))) == 1.0
     tsx = '''const EDITORIAL: Look = { preset: "editorial", ground: "#F2EEE6", accent: "#E5482C", surface: "card",
       font: "Archivo", font_display: "Newsreader" };
     const NEUTRAL: Look = { ...EDITORIAL, preset: "neutral", ground: "#FFFFFF", accent: "#0D0D0D", font: "Geist" };

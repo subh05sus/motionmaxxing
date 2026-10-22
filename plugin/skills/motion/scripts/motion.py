@@ -431,16 +431,20 @@ def cream(rgb):
 
 
 def ground_of(video, w, h):
-    """(rgb, share) of the dominant colour of the clip's frame at 3/4 of its length, quantised like ai_tells.cream_ground."""
+    """(rgb, share) of the dominant colour of the clip's frame at 3/4 of its length: found in 16-level bins like
+    ai_tells.cream_ground, measured as the mean of that bin's pixels."""
     import numpy as np
     dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(video)],
                                capture_output=True, text=True).stdout.strip() or 1)
     raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{dur * 0.75:.3f}", "-i", str(video), "-frames:v", "1", "-vf",
                           f"scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True).stdout
-    q = (np.frombuffer(raw[:w * h * 3], np.uint8).reshape(-1, 3) >> 4).astype(np.int32)
-    keys, counts = np.unique(q[:, 0] * 256 + q[:, 1] * 16 + q[:, 2], return_counts=True)
+    px = np.frombuffer(raw[:w * h * 3], np.uint8).reshape(-1, 3)
+    q = (px >> 4).astype(np.int32)
+    key = q[:, 0] * 256 + q[:, 1] * 16 + q[:, 2]
+    keys, counts = np.unique(key, return_counts=True)
     k = int(keys[counts.argmax()])
-    return (((k >> 8) & 15) * 16 + 8, ((k >> 4) & 15) * 16 + 8, (k & 15) * 16 + 8), counts.max() / len(q)
+    # the dominant bin's real mean, not its centre (ai_tells.cream_ground: a near-white on a bin edge read as cream)
+    return tuple(int(v) for v in px[key == k].mean(axis=0) + 0.5), counts.max() / len(q)
 
 
 def panel_fill(video, ground, tol=10, min_fill=0.55):
@@ -551,6 +555,8 @@ def placed_beat(orig, beat, src, first, last_):
     return {"word": beat["word"], "nth": beat["nth"], "kind": "anim", "type": "video_card", "hold_s": hold,
             "props": {"src": src, "size": beat["size"], "start_s": start_s, "motion": beat["id"],
                       **({"bare": True} if beat.get("panel") else {})}, "motion": beat["id"],
+            # where it plays stays the beat's choice: half screen, behind the speaker, a cutaway, its box
+            **{k: orig[k] for k in ("layout", "layer", "cutaway", "box") if k in orig},
             "fallback": orig}
 
 

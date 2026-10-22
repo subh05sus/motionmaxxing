@@ -362,16 +362,20 @@ const Backdrop: React.FC<{ card: Card; t: number; top: number }> = ({ card, t, t
   const FADE = 0.35;
   const a = Math.max(0, Math.min(1, (t - card.start) / FADE, (card.end - t) / FADE));
   const p = Math.max(0, Math.min(1, (t - card.start) / Math.max(0.1, card.end - card.start)));
-  const video = /\.(mp4|mov|m4v|webm)$/i.test(card.src ?? "");
+  // a motion clip (video_card) behind the speaker or as a cutaway: its file is in the card's props, played from start_s
+  const clip = card.anim?.type === "video_card" ? (card.anim.props as { src?: string; start_s?: number } | undefined) : undefined;
+  const src = card.src ?? clip?.src;
+  const video = /\.(mp4|mov|m4v|webm)$/i.test(src ?? "");
   const from = Math.round(card.start * fps);
   const wide = !!card.size && card.size[0] / card.size[1] > (width / height) * 1.5;
   const k = 1.06 - 0.06 * p;
-  if (!card.src) return null;
+  if (!src) return null;
   if (video) {
     return (
       <AbsoluteFill style={{ opacity: a, backgroundColor: "#000" }}>
         <Sequence from={from} durationInFrames={Math.max(1, Math.round((card.end - card.start) * fps) + 1)} layout="none">
-          <OffthreadVideo src={staticFile(card.src)} muted style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <OffthreadVideo src={staticFile(src)} muted startFrom={Math.round(Number(clip?.start_s ?? 0) * fps)}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         </Sequence>
       </AbsoluteFill>
     );
@@ -379,18 +383,18 @@ const Backdrop: React.FC<{ card: Card; t: number; top: number }> = ({ card, t, t
   if (!wide) {
     return (
       <AbsoluteFill style={{ opacity: a, backgroundColor: "#000" }}>
-        <Img src={staticFile(card.src)} style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${k})` }} />
+        <Img src={staticFile(src)} style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${k})` }} />
       </AbsoluteFill>
     );
   }
   const w = width * 0.94, h = (w * card.size![1]) / card.size![0];
   return (
     <AbsoluteFill style={{ opacity: a, backgroundColor: "#000", overflow: "hidden" }}>
-      <Img src={staticFile(card.src)} style={{ position: "absolute", inset: -width * 0.08, width: width * 1.16, height: height + width * 0.16,
+      <Img src={staticFile(src)} style={{ position: "absolute", inset: -width * 0.08, width: width * 1.16, height: height + width * 0.16,
         objectFit: "cover", filter: "blur(36px) brightness(0.55) saturate(1.2)" }} />
       <div style={{ position: "absolute", left: (width - w) / 2, top: (top / 100) * height, width: w, height: h, borderRadius: width * 0.03,
         overflow: "hidden", boxShadow: "0 30px 80px -30px rgba(0,0,0,0.6)", transform: `scale(${k})`, transformOrigin: "50% 0%" }}>
-        <Img src={staticFile(card.src)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        <Img src={staticFile(src)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       </div>
     </AbsoluteFill>
   );
@@ -443,7 +447,8 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
   // The whole frame: the overlay layout, and the split layout while its panel is closed (boxes, cards behind the
   // speaker and backgrounds play over the full frame between the beats that open the panel).
   if (!split || !layout || o === 0) {
-    const cardViews = up.filter((s) => s.card.layout !== "scene" && s.card.layer !== "behind" && !panelUp(s.card)).map(view);
+    // backgrounds (behind the speaker, or a cutaway with no speaker) are drawn by Backdrop, never as a card on top
+    const cardViews = up.filter((s) => s.card.layout !== "scene" && s.card.layout !== "background" && s.card.layer !== "behind" && !panelUp(s.card)).map(view);
     const pan = panAt(t, pans);
     const zm = zoomAt(t, zooms);
     const cam: React.CSSProperties = { transform: `translateX(${footageX(t, cards, width, m) + (pan.x / 100) * width}px) scale(${zm.k * pan.k})`,
@@ -467,7 +472,11 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
         {cardViews}
         {sceneViews}
         {texts?.length ? <Texts items={texts} t={t} width={width} height={height} font={captions.style.font_match} /> : null}
-        <AbsoluteFill style={{ opacity: capFade }}><Captions style={capStyle} chunks={captions.chunks} t={t} m={m} /></AbsoluteFill>
+        {/* a split layout with its panel shut is the whole frame: captions over the head (caption_full_y), as the
+            split view's own captions are when the window is all the way up; y_pct is the height beside the panel */}
+        <AbsoluteFill style={{ opacity: capFade }}>
+          <Captions style={split && layout && !capStyle.flat ? { ...capStyle, y_pct: layout.caption_full_y } : capStyle} chunks={captions.chunks} t={t} m={m} />
+        </AbsoluteFill>
         <Sfx />
       </AbsoluteFill>
     );

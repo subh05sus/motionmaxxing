@@ -761,7 +761,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     """All checks above on one render. Returns (findings, measured)."""
     import cv2
     import numpy as np
-    from check import INK_DIFF, footage_affine, stream, TEXT_ANIMS, STATIC_S
+    from check import INK_DIFF, footage_affine, panel_at, stream, TEXT_ANIMS, STATIC_S
     from edit import footage_filter, still_frames
     from plan import CARD_LEAD_S, ENTRANCES, MOTION_K, OVERLAY_LEAD_S, overlay_led, probe
     cj = edit / "captions.json"
@@ -781,6 +781,8 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
     ch = max(4.0, cs.get("size_pct", 6) / 100 * max(W, H))           # Captions.tsx: size_pct of the long side
     cap_ys = sorted({cs.get("y_pct", 70)} | ({plan["layout"]["caption_full_y"]} if split else set()))
     cap_rows = (int(cap_ys[0] / 100 * H - ch), int(cap_ys[-1] / 100 * H + ch))   # centred on y_pct (translateY -50%)
+    # where the captions are drawn: beside the open panel at y_pct, over the head (caption_full_y) while it is shut
+    cap_at = lambda o: [cs.get("y_pct", 70)] if not split or o >= 1 else [plan["layout"]["caption_full_y"]]
 
     def box_px(b):
         x0, y0 = int(b[0] / 100 * W), int(b[1] / 100 * H)
@@ -814,10 +816,12 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         small_r.append(sr_)
         small_b.append(sb_)
         up = [i for i in range(len(cards)) if first[i] - 3 <= n <= last[i]]
-        if n in page_frames:
-            under = None if split else [cv2.warpAffine(c_, np.float32(footage_affine(t, plan, W, H)), (W, H))
-                                        for c_ in (cut_prev, cut, cut_next) if c_ is not None]
-            nl = max(caption_lines(frame, cap_bgr, y / 100 * H, ch, under) for y in cap_ys)
+        o = panel_at(t, plan)
+        sp = o >= 0.5      # the panel open: the split geometry; shut (a mixed edit between its panels): the overlay one
+        if n in page_frames and not 0 < o < 1:    # mid-move the captions glide between their two heights
+            under = None if sp else [cv2.warpAffine(c_, np.float32(footage_affine(t, plan, W, H)), (W, H))
+                                     for c_ in (cut_prev, cut, cut_next) if c_ is not None]
+            nl = max(caption_lines(frame, cap_bgr, y / 100 * H, ch, under) for y in cap_at(o))
             pg = page_frames[n]   # a page plan.py stacked takes 2; a big keyword takes its own line (up to 3)
             if nl > (pg.get("lines") or (min(3, len(pg["words"])) if pg.get("big") else 0) or cs.get("max_lines") or 1):
                 wrapped.append((t, page_frames[n]["text"], nl))
@@ -825,7 +829,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         if not need:
             continue
         nb = []      # the footage one frame either side: where the render lands a frame off the cut (a 29.97 fps
-        if split:    # source drawn at 30), a card's box would otherwise read the footage's own change as the card
+        if sp:       # source drawn at 30), a card's box would otherwise read the footage's own change as the card
             bg = ground
         else:
             zm = np.float32(footage_affine(t, plan, W, H))
@@ -842,7 +846,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
                 frame = frame.copy()
                 frame[person] = bg[person]
         if n in sframes:
-            kept[settle[sframes[n]]] = (frame.copy(), bg.copy())
+            kept[settle[sframes[n]]] = (frame.copy(), bg.copy(), sp)
         if n in cap_frames:
             caps.append((t, cap_frames[n]))
         grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
@@ -851,7 +855,7 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
             if x1 <= x0 or y1 <= y0:
                 continue
             diff = card_diff(frame[y0:y1, x0:x1], [b_[y0:y1, x0:x1] for b_ in [bg] + nb])
-            ink = diff > INK_DIFF["split" if split else "overlay"]
+            ink = diff > INK_DIFF["split" if sp else "overlay"]
             r0, r1 = max(0, cap_rows[0] - y0), max(0, cap_rows[1] - y0)
             ink[r0:r1] = False                      # the caption is not the card
             st = series[i]
@@ -1048,8 +1052,8 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
                          "show the real thing: a logo, a capture of the product, or a photo the user gave"))
         if i not in kept or c.get("src") or c.get("lane") == "logo":
             continue
-        frame, bg = kept[i]
-        crop, bgv = panel_crop(frame, bg, boxes[i], INK_DIFF["split" if split else "overlay"], split)
+        frame, bg, sp = kept[i]
+        crop, bgv = panel_crop(frame, bg, boxes[i], INK_DIFF["split" if sp else "overlay"], sp)
         if crop is None:
             continue
         grey = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
@@ -1113,7 +1117,10 @@ def run(edit, plan, video, plan_path, style=None, cuts=(), brand=None):
         frame = grab(video, t, FW, FH)
         if frame is None:
             continue
-        got = caption_fill(frame, rgbs, [y / 100 * FH for y in cap_ys], 2 * ch, text)
+        o = panel_at(t, plan)
+        if 0 < o < 1:
+            continue
+        got = caption_fill(frame, rgbs, [y / 100 * FH for y in cap_at(o)], 2 * ch, text)
         if got is None:
             continue
         rows, fill, touches = got
