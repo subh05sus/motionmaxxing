@@ -1,0 +1,45 @@
+# dependencies and builds
+node_modules/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# media and working files never live in the repo (the library is ~/Movies/motionmaxxing)
+*.mp4
+*.mov
+*.MOV
+*.m4v
+*.wav
+*.mp3
+*.aac
+out/
+edits/
+library/
+renders/
+*.log
+
+# secrets
+.env
+.env.*
+*.pem
+
+# machines
+.DS_Store
+.idea/
+.vscode/
+.claude/settings.local.json
+eval-results/
+
+# local working notes, never pushed (learnings, todo, worklog, private context)
+/learnings.md
+/todo.md
+/worklog.md
+/context.md
+/notes/
+/decisions.md
+/CLAUDE.local.md
