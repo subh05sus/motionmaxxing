@@ -25,8 +25,9 @@ sentences. For each, one idea and where it plays:
 
 - Clips run back to back: each clip's `t0` is the previous clip's end. Half-screen clips crossfade into each other.
 - Not too fast: a cutaway holds about 2 s or more; never more than three layout changes in ten seconds.
-- A real recording (the record skill) only as a whole designed shot. Never a zoomed page crop in the panel (cut
-  headings, a sliced nav bar): build the idea as a clip instead.
+- A recording made for the video (the record skill) goes in it: as a footage clip (below), never as a zoomed page
+  crop in the panel (cut headings, a sliced nav bar). check.py plan FAILs a recording made for the video that is in
+  no clip (its brief.json "for"), unless its brief says "skip": "<why>".
 - The speaker's face for an avatar or a thumbnail: `motion.py portrait <edit>` (a pause between words, the head
   centred), then look at `images/avatar.jpg` and `images/portrait-9x16.jpg`; `--at T` for another moment.
 
@@ -49,9 +50,10 @@ is the edit's panel ground (#F4F4F2): the clip and the panel are one surface.
 Composition (the gates check these):
 - **Panel**: the drawing's bounding box covers at least 55% of the panel and is centred within 2% of its width; the
   corners stay ground (no full-width bar touching them). Big type: 50-96 px. Real logos from `assets/logo-*.svg`.
-- **Background**: the speaker covers the middle and bottom. Content goes in the band above his head (13-30% of the
-  height) and beside it; the captions sit at about 34%: keep 31-37% clear or let them sit on a quiet ground.
-- **Cutaway**: a full phone screen; keep the caption band clear (a notification rises into the lower half, iOS-like).
+- **Background**: the speaker covers the middle and bottom. Content goes in the band above his head (13-40% of the
+  height) and beside it. The captions sit on his chin (about 74-80%), over the speaker, not over the clip.
+- **Cutaway**: a full phone screen; keep the caption band (74-80%) clear (a notification rises into the lower half,
+  iOS-like, and stops above it).
 
 Motion:
 - Every part lands on its word (`RC.word`, 0.1-0.3 s early). Something moves until the end: `RC.camera` on `.cam`,
@@ -81,3 +83,31 @@ python3 <edit>/matte.py edits/<name> ; python3 <edit>/plan.py …     # backgrou
 word said once the clip has begun, held to the clip's end; a beat or image inside a clip's time is left out (kept
 in `*.before-kit.json`). `align` sets each clip's `start_s` from where the plan started its card, so its parts stay
 on their words. Then render, `check.py render`, and look at a frame from every beat before handing it over.
+
+## Footage: a recording in a clip
+
+A demo recorded for the video (the record skill, `recordings/<name>/`) is shown in a clip like any other beat: in a
+browser window (traffic lights, the page's address), framed on whole sections, with a ring or a highlighter on the
+part that is said.
+
+1. A plain render to frame from: `render.py <recording> --aspect 16:9 --zoom 1 --look bare --no-cursor --out plain.mp4`
+   (the page as recorded, no camera moves of its own). events.json has each target's box and time; a frame with a
+   percent grid tells where each section sits (fractions of the video).
+2. Copy it into the clip's `assets/`. Each `<video>` needs an `id` (the renderer freezes one without): `<video
+   id="v-hero" src="assets/site.mp4" data-start="0" data-duration="3.2" data-media-start="0.6" muted playsinline
+   preload="auto">` inside `.rc-footage .rc-fv`. Two moments of one recording: two boxes, crossfaded.
+3. Frame a region `[x, y, w, h]` (fractions, `w = h` keeps the video's shape) with the inner layer's transform, from one
+   region to the next (`RC.zoomTo` always starts from the whole video). Regions stay inside the page (a plain render
+   has dark side bars), and the text must read on a phone: a card's body text at 20 px or more.
+4. Never a slice: a neighbouring card's edge in the view gets a veil in the page's own colour (sampled from the frame)
+   over it, inside `.rc-fv`, so the section reads as one whole piece. A search box cropped to itself and its answer.
+5. The line said: `RC.spot` (a ring) for a button or a row; a highlighter (`.rc-spot` with no border, an accent fill
+   at about 28%, wiped in with scaleX) for a phrase inside a paragraph, where a ring would cut the lines around it.
+6. List the recording in beat.json `"footage": ["recordings/<name>"]`, so check.py sees it used.
+
+## After a re-cut
+
+`python3 "$M" retime edits/<name>` finds each clip's words again on the new cut and moves the clip with them (its
+words and DURATION in index.html, beat.json); clips run back to back. A clip whose line changed is listed: build it
+again. Then check every clip (two at a time), place-kit, plan, align, plan, matte, plan, render.
+

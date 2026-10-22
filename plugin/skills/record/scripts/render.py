@@ -283,7 +283,10 @@ def render(d, aspect="16:9", fps=30, out=None, width=None, zmax=None, look="wind
     click_t = np.array([c[0] for c in clicks]) if clicks else np.array([])
     sprites = {}
 
-    out = Path(out) if out else d / ("demo.mp4" if aspect == "16:9" else f"demo-{aspect.replace(':', 'x')}.mp4")
+    # a bare name (--out plain.mp4) is a file in the recording's folder, never in the folder this was run from (a
+    # recording left in a repo is one commit away from being published)
+    out = (d / out if Path(out).parent == Path(".") else Path(out)) if out else \
+        d / ("demo.mp4" if aspect == "16:9" else f"demo-{aspect.replace(':', 'x')}.mp4")
     out.parent.mkdir(parents=True, exist_ok=True)
     enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{ow}x{oh}",
                             "-r", str(fps), "-i", "-", "-c:v", "libx264", "-preset", "medium", "-crf", "16",

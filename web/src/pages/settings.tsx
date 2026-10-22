@@ -69,7 +69,7 @@ function RecorderGroup() {
   const [msg, setMsg] = useState<string>();
   const open = async () => {
     setMsg(undefined);
-    try { await api("/api/recorder/login", { json: { url } }); setMsg("The recording browser is opening. Sign in there, then close its window."); setUrl(""); sites.reload(); }
+    try { await api("/api/recorder/login", { json: { url } }); setMsg("The recording browser is opening as a normal Chrome window, so Google sign-in works. Sign in, then quit it (⌘Q). You can add a cookie editor from the Chrome Web Store there too."); setUrl(""); sites.reload(); }
     catch (e) { setMsg((e as Error).message); }
   };
   const list = Object.entries(sites.data ?? {});

@@ -752,6 +752,22 @@ def demo():
     ws = [{"text": "Schritt", "start": 1.0, "end": 1.3}, {"text": "eins,", "start": 1.3, "end": 1.6}, {"text": "Schritt", "start": 4.1, "end": 4.4},
           {"text": "zwei.", "start": 4.4, "end": 4.8}]
     assert first_word(ws, 4.0) == ("Schritt", 2, 4.1) and first_word(ws, 9.0) is None
+    # retime: after a re-cut each clip finds its words again (a fragment cut 0.8 s before the second line), moves with
+    # them, and the clips run back to back; index.html's words and length follow
+    with tempfile.TemporaryDirectory() as t:
+        ed = Path(t)
+        new_words = [("Step", 0.0), ("one,", 0.3), ("give", 0.6), ("it", 0.8), ("From", 2.2), ("then", 2.4), ("on", 2.6), ("it", 2.9)]
+        (ed / "captions.json").write_text(json.dumps([{"text": w, "start": a, "end": a + 0.2, "type": "word"} for w, a in new_words]))
+        for cid, t0, dur, ws_ in (("a", 0.0, 3.0, [("Step", 0.0), ("one,", 0.3), ("give", 0.6)]), ("b", 3.0, 2.0, [("From", 0.0), ("then", 0.2), ("on", 0.4)])):
+            (ed / "motion" / cid).mkdir(parents=True)
+            (ed / "motion" / cid / "beat.json").write_text(json.dumps({"id": cid, "engine": "kit", "start": t0, "dur": dur,
+                                                                       "words": [{"w": w, "t": a} for w, a in ws_]}))
+            (ed / "motion" / cid / "index.html").write_text(f'<div id="root" data-hyperframes-root data-duration="{dur:.2f}"></div>'
+                                                             f'<script>window.__rcVoice = {{ words: [], rms: [], fps: 30 }};\nvar DURATION = {dur:.2f};</script>')
+        got = {b["id"]: (t0, b["dur"]) for b, t0 in retime(ed, total=5.0)}
+        assert got == {"a": (0.0, 2.2), "b": (2.2, 2.8)}, got
+        page = (ed / "motion" / "b" / "index.html").read_text()
+        assert 'data-duration="2.80"' in page and "var DURATION = 2.80;" in page and '"w": "on", "start": 0.4' in page, page
     # the portrait: a closed mouth (lips, skin) reads near 0, an open one (a dark cavity, teeth) far above
     import numpy as np
     img = np.zeros((200, 200, 3), np.uint8); img[:] = (120, 150, 200)          # warm skin (BGR)
@@ -947,16 +963,69 @@ def scaffold(edit, cid, layout, t0, dur, images=(), line=""):
     beat = {"id": cid, "engine": "kit", "clock": "cut", "type": "video_card", "start": t0, "dur": dur, "size": [w, h], "layout": layout,
             "line": line, "words": [{"w": x["w"], "t": x["start"]} for x in said], **({"panel": True} if layout == "panel" else {})}
     (d / "beat.json").write_text(json.dumps(beat, indent=1, ensure_ascii=False), encoding="utf-8")
-    import fcntl   # several scaffolds at once: beats.json is rebuilt from every beat.json under a lock
-    root = edit / "motion"
+    write_beats(edit / "motion")
+    print(f"{d}  {layout} {w}x{h}  t0 {t0}  {dur} s  words: " + " ".join(f"{x['w']}@{x['start']:.2f}" for x in said))
+    return d
+
+
+def write_beats(root):
+    """beats.json (motion.py check reads the look's ground from it), rebuilt from every clip's beat.json under a lock:
+    several scaffolds at once left it corrupt."""
+    import fcntl
     with open(root / ".beats.lock", "w") as lk:
         fcntl.flock(lk, fcntl.LOCK_EX)
         beats = sorted((json.loads(f.read_text(encoding="utf-8")) for f in root.glob("*/beat.json")), key=lambda b: b["start"])
         tmp = root / "beats.json.tmp"
         tmp.write_text(json.dumps({"clock": "cut", "look": {"ground": KIT_GROUND}, "beats": beats}, indent=1, ensure_ascii=False), encoding="utf-8")
         tmp.replace(root / "beats.json")
-    print(f"{d}  {layout} {w}x{h}  t0 {t0}  {dur} s  words: " + " ".join(f"{x['w']}@{x['start']:.2f}" for x in said))
-    return d
+
+
+def retime(edit, total=None):
+    """After a re-cut: each kit clip found again on the new cut by its own words (beat.json, in order: the first run of
+    two that matches, after the clip before) and moved by as much as they moved. Clips then run back to back (each one
+    ends where the next starts, the last at the cut's end), and beat.json, index.html's words and DURATION follow, so
+    every RC.word lands on its word again. A clip whose words are not found is listed and left: build it for the new
+    line. Then check the clips again (two at a time), place-kit, plan.py, align, plan.py."""
+    import difflib
+    edit = Path(edit)
+    words = cut_words(edit)
+    norm = lambda s: re.sub(r"[^\w]+", "", s.lower())
+    caps = [norm(w["text"]) for w in words]
+    root = edit / "motion"
+    clips = sorted((json.loads(f.read_text(encoding="utf-8")) for f in root.glob("*/beat.json")), key=lambda b: b["start"])
+    clips = [b for b in clips if b.get("engine") == "kit"]
+    if total is None:
+        total = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                      str(edit / "cut.mp4")], capture_output=True, text=True).stdout.strip() or words[-1]["end"])
+    found, at = [], 0
+    for b in clips:
+        mine = [norm(w["w"]) for w in b.get("words", [])]
+        blk = next((m for m in difflib.SequenceMatcher(None, mine, caps[at:], autojunk=False).get_matching_blocks()
+                    if m.size >= min(2, len(mine))), None) if mine else None
+        if not blk or not blk.size:
+            print(f"  {b['id']:<14} its words are not on the new cut ({' '.join(w['w'] for w in b.get('words', [])[:6])}...): "
+                  "left where it was, build it for the new line")
+            continue
+        i = at + blk.b
+        found.append((b, max(0.0, round(words[i]["start"] - b["words"][blk.a]["t"], 2))))
+        at = i + blk.size
+    found.sort(key=lambda x: x[1])
+    for k, (b, t0) in enumerate(found):
+        dur = round((found[k + 1][1] if k + 1 < len(found) else total) - t0, 2)
+        said = [{"w": x["text"], "start": round(x["start"] - t0, 3), "end": round(x["end"] - t0, 3)} for x in words
+                if t0 - 0.05 <= x["start"] < t0 + dur]
+        d = root / b["id"]
+        print(f"  {b['id']:<14} t0 {b['start']:6.2f} -> {t0:6.2f}   {b['dur']:5.2f} -> {dur:5.2f} s")
+        b.update(start=t0, dur=dur, words=[{"w": x["w"], "t": x["start"]} for x in said])
+        (d / "beat.json").write_text(json.dumps(b, indent=1, ensure_ascii=False), encoding="utf-8")
+        page = (d / "index.html").read_text(encoding="utf-8")
+        page = re.sub(r"(window\.__rcVoice = \{ words: )\[.*?\](, rms)", lambda m: m.group(1) + json.dumps(said, ensure_ascii=False) + m.group(2),
+                      page, count=1, flags=re.S)
+        page = re.sub(r"var DURATION = [\d.]+;", f"var DURATION = {dur:.2f};", page, count=1)
+        page = re.sub(r'(id="root"[^>]*?data-duration=")[\d.]+(")', lambda m: f"{m.group(1)}{dur:.2f}{m.group(2)}", page, count=1, flags=re.S)
+        (d / "index.html").write_text(page, encoding="utf-8")
+    write_beats(root)
+    return found
 
 
 def first_word(words, t0):
@@ -1152,6 +1221,7 @@ def main():
     k.add_argument("--images", default="", help="comma-separated files from the edit's images/ the clip uses")
     k.add_argument("--line", default="")
     sub.add_parser("place-kit").add_argument("edit")
+    sub.add_parser("retime", help="after a re-cut: every kit clip moved onto the new cut by its words").add_argument("edit")
     sub.add_parser("align").add_argument("edit")
     po = sub.add_parser("portrait")
     po.add_argument("edit")
@@ -1180,6 +1250,8 @@ def main():
         strips(a.video, [float(x) for x in a.at.split(",")], a.out, a.before, a.after, a.fps, a.safe)
     elif a.cmd == "scaffold":
         scaffold(a.edit, a.id, a.layout, a.t0, a.dur, [i for i in a.images.split(",") if i], a.line)
+    elif a.cmd == "retime":
+        retime(a.edit)
     elif a.cmd == "place-kit":
         place_kit(a.edit)
     elif a.cmd == "align":

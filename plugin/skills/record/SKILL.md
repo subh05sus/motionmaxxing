@@ -25,8 +25,11 @@ for that site. localhost is always allowed.
 
 The recording browser is Chrome with its own profile (`~/.motionmaxxing/browser`): the user's own Chrome, cookies
 and accounts are never used. A site that needs an account (claude.ai does): when `look` says `"signIn": true`, ask
-"Sign in to <site> in the recording browser? A window opens: sign in there, then close it." and on yes run
-`node "$R" login <url>` (it waits until the window is closed). Never type a password yourself, never ask for one.
+"Sign in to <site> in the recording browser? A window opens: sign in there, then quit it (Cmd-Q)." and on yes run
+`node "$R" login <url>` (it waits until the window is closed). That window is a plain Chrome on the recording
+profile, nobody driving it, so Google's sign-in works there ("This browser or app may not be secure" is what a driven
+browser gets); a cookie editor added there from the Chrome Web Store is the other way in, and extensions load in
+recordings too. Never type a password yourself, never ask for one.
 
 ## 2. Look before you plan
 
@@ -101,6 +104,12 @@ fast), `--no-fast`, `--fps 60`. Then check it: `ffmpeg -v error -i <dir>/demo.mp
 -frames:v 1 <dir>/sheet.jpg` and read the sheet: is anything personal unblurred, does the camera land on what
 matters, did the page show what the line says? Fix and run again if not. End with the length and the path; the
 studio's Demos page shows it.
+
+**Recorded for a video**: write `{"title", "url", "show", "for": "<the edit's folder name>"}` to `<dir>/brief.json`
+(the studio writes it for demos made on the Demos page). A recording made for a video is shown in it: the motion
+skill puts it in a footage clip (`references/kit-clips.md`, "Footage"), from a plain render
+(`render.py <dir> --zoom 1 --look bare --no-cursor --out plain.mp4`, written in `<dir>`). check.py plan FAILs an edit
+whose recording is in no clip, until it is used or its brief says `"skip": "<why>"`: never record for nothing.
 
 ## Safety
 

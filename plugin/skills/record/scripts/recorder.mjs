@@ -11,7 +11,10 @@
  *                                                    render.py makes the video
  *
  * The browser is Google Chrome with its own profile in ~/.motionmaxxing/browser: the user's own Chrome, cookies and
- * extensions are never touched. Sign-ins made with `login` stay in that profile.
+ * extensions are never touched. Sign-ins made with `login` stay in that profile. `login` opens that profile in a plain
+ * Chrome window, not one a script drives: Google's sign-in refuses a browser under automation ("This browser or app
+ * may not be secure"), and so do sites that sign in with Google. Extensions the user adds in that window (a cookie
+ * editor, to bring a session over) load in recordings too.
  *
  * Safety: a site is driven only once the user allowed it (`allow`); a click on anything that deletes, pays, posts,
  * publishes, subscribes or signs out is refused unless its step says "confirmed": true (Claude asks the user first).
@@ -20,6 +23,7 @@
  * Exit codes: 0 ok, 1 a step failed (fail.png and the reason are written), 2 usage, 3 site not allowed yet.
  */
 import fs from "node:fs";
+import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -95,7 +99,17 @@ async function launch({ headless = false, viewport = true } = {}) {
       "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--disable-background-timer-throttling",
       ...(headless ? [`--force-device-scale-factor=${DPR}`] : [])],
     ignoreDefaultArgs: ["--enable-automation"],
+    enableExtensions: true,     // what the user installed in the sign-in window (a cookie editor) works here too
   });
+}
+
+/** The recording profile in a plain Chrome window, nobody driving it, so Google's sign-in accepts it. The cookie
+ * flags match puppeteer's (basic password store, mock keychain): a session saved here is one the recorder can read. */
+function plainChrome(url) {
+  fs.mkdirSync(PROFILE, { recursive: true });
+  unlockProfile();
+  return spawn(findChrome(), [`--user-data-dir=${PROFILE}`, "--no-first-run", "--no-default-browser-check",
+    "--password-store=basic", "--use-mock-keychain", "--hide-crash-restore-bubble", "--new-window", url], { stdio: "ignore" });
 }
 
 /** Blur personal data live: the shot list's selectors, and any text that is an email, phone number, key or IBAN. */
@@ -470,19 +484,16 @@ async function look(url, dir, a) {
 }
 
 async function login(url, minutes) {
-  const browser = await launch({ viewport: false });
-  const page = (await browser.pages())[0] ?? (await browser.newPage());
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
-  console.log(`The recording browser is open at ${url}. Sign in there, then close its window.`);
-  const end = Date.now() + minutes * 60_000;
-  while (browser.connected && Date.now() < end) {
-    await sleep(1000);
-    const pages = await browser.pages().catch(() => []);
-    if (!pages.length) break;
-  }
-  const u = browser.connected ? (await browser.pages().catch(() => []))[0]?.url() : undefined;
-  await browser.close().catch(() => {});
-  console.log(u && /\/(login|signin|auth)/i.test(u) ? "still on the sign-in page" : "done: the sign-in is kept in the recording browser");
+  const chrome = plainChrome(url);
+  console.log(`The recording browser is open at ${url}, as a plain Chrome window (Google sign-in works there). ` +
+    "Sign in, then quit it (Cmd-Q). A cookie editor from the Chrome Web Store can be added in that window too.");
+  const closed = await new Promise((resolve) => {
+    const t = setTimeout(() => resolve(false), minutes * 60_000);
+    chrome.on("exit", () => { clearTimeout(t); resolve(true); });
+    chrome.on("error", (e) => { clearTimeout(t); console.error(`could not open Chrome: ${e.message}`); resolve(false); });
+  });
+  if (!closed) chrome.kill();
+  console.log("done: the sign-in is kept in the recording browser");
 }
 
 // ------------------------------------------------------------------ main

@@ -15,7 +15,7 @@ One clip per beat, built for that line, never a template filled in. The template
 
 **The kit engine (the default for a vertical edit whose style asks for motion):** a clip for most lines on the kit in
 `kit/` (Apple springs, iPhone and Mac UI, Clawd), placed half screen, behind the speaker or as a cutaway, built here in
-this session: `references/kit-clips.md` (`motion.py scaffold`, `check`, `place-kit`, `align`, `portrait`). The steps
+this session: `references/kit-clips.md` (`motion.py scaffold`, `check`, `place-kit`, `align`, `portrait`, and `retime` after a re-cut). The steps
 below (`pick`, clip-builder agents, `place`) are the template engine, for 16:9 and board styles.
 `M="${CLAUDE_SKILL_DIR}/scripts/motion.py"`; paths are relative to the library, like edit's. Run the
 scripts with `python3` on Mac and Linux, `py` on Windows.
@@ -154,7 +154,7 @@ A user's own style skill gets bespoke animations with one line: "Animations: use
 
 ## Files
 
-- `scripts/motion.py` (pick, check, place, status, strips; the kit engine: scaffold, place-kit, align, portrait), `check_clip.py`, `check_motion.py`,
+- `scripts/motion.py` (pick, check, place, status, strips; the kit engine: scaffold, place-kit, align, portrait, retime), `check_clip.py`, `check_motion.py`,
   `check_composition.py`, `measure_ink.py`, `clip_motion.py`: each with a `demo` self-check.
 - `template/`: the HyperFrames composition every clip starts from. `kit/`: the kit engine's kit (reelcut's design kit:
   kit.css, kit.js, ui/ families, the Inter Tight, Instrument Serif and JetBrains Mono fonts under the OFL, `clip.html`,
