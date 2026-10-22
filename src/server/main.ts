@@ -101,7 +101,7 @@ function cutPrompt(id: string, extra: { instructions?: string; script?: string }
     "- A phone or WhatsApp clip has a variable frame rate: make edits/<name>/source.mp4 with join.py first (step 0a), and cut that.",
     "- The take is usually German: keep the user's words exactly; a cut only removes.",
     "- Last take wins, unless it is worse. Where takes are close, run takes.py sheets and look at the sheets; still unclear,",
-    "  watch the stretch with the /watch skill.",
+    "  watch the stretch with the motionmaxxing watch skill.",
     "- After verify: refine any SURVIVED repeat (transcribe.py refine) and fix the spans, one round.",
     "- The studio shows the progress and the cut by itself: never run review.py, never open a browser or a page.",
     "- Ask only with AskUserQuestion (the studio shows a card). Never ask whether to cut first: cut first.",

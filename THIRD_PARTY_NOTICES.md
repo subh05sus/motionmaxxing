@@ -11,6 +11,7 @@ Portions of this software are licensed under the MIT License with their own copy
 | Part | Licence | Notes |
 |---|---|---|
 | `plugin/skills/motion-design/` (motion design principles) | MIT, Copyright (c) 2025 LottieFiles | Its `LICENSE` sits in the folder. |
+| `plugin/skills/watch/` (video understanding) | MIT, Copyright (c) 2026 subh05sus | From github.com/subh05sus/video-understanding-skill. |
 
 ## Tools the editor runs (not shipped here)
 

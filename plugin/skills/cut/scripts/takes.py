@@ -13,7 +13,7 @@ the face), and lines up the numbers that tell takes apart:
 
 into takes/takes.md with the words of each take. The last take wins unless it is worse on the sheet or the numbers
 (a stumble, a long pause, low energy, eyes off camera): last-take-wins is the default, not a law (the owner's editor
-kept the first take of a line 5 times in 16 on one reel). Still close: watch the stretch with the /watch skill.
+kept the first take of a line 5 times in 16 on one reel). Still close: watch the stretch with the watch skill.
 The source: --source, else <edit>/source.mp4 or joined.mp4, else report.json's "source".
 """
 import json
@@ -85,7 +85,7 @@ def sheets(d, ranges, source=None, line=None):
     out = d / "takes"
     rows = [f"# Takes{f' of: {line}' if line else ''}", "",
             "Look at every sheet (eyes on camera, energy, a stumble), then the numbers. The last take wins unless it "
-            "is worse. Still close: watch the stretch with /watch.", ""]
+            "is worse. Still close: watch the stretch with the watch skill.", ""]
     for n, (a, b) in enumerate(ranges, 1):
         img = sheet(src, a, b, out / f"take-{n}.jpg")
         m = numbers(words, a, b, P.hard_fillers)

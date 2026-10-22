@@ -115,7 +115,7 @@ python3 "$S/takes.py" sheets edits/<name> <a>-<b> <a>-<b> [--line "the line"]
 
 It writes `takes/takes.md`: a sheet of eight frames per take (Read each image: eyes on the camera or off it, energy, a
 stumble) and its numbers (seconds, words a second, pauses, fillers, loudness). The last take wins unless it is worse.
-Still close: watch the stretch with the `/watch` skill (video understanding) and decide from what you see and hear.
+Still close: watch the stretch with the watch skill (`motionmaxxing:watch`, video understanding) and decide from what you see and hear.
 
 Only if the user wants it shorter (or their taste says to run the editorial pass), also read `references/editorial-rules.md` and add `redundant`
 cuts (content calls).
