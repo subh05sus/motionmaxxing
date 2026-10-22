@@ -748,6 +748,19 @@ def note(edit, text, at=None, clip=None):
 
 
 def demo():
+    # the kit engine: a clip's card starts on the first word said once it has begun (the 2nd "Schritt" here)
+    ws = [{"text": "Schritt", "start": 1.0, "end": 1.3}, {"text": "eins,", "start": 1.3, "end": 1.6}, {"text": "Schritt", "start": 4.1, "end": 4.4},
+          {"text": "zwei.", "start": 4.4, "end": 4.8}]
+    assert first_word(ws, 4.0) == ("Schritt", 2, 4.1) and first_word(ws, 9.0) is None
+    # the portrait: a closed mouth (lips, skin) reads near 0, an open one (a dark cavity, teeth) far above
+    import numpy as np
+    img = np.zeros((200, 200, 3), np.uint8); img[:] = (120, 150, 200)          # warm skin (BGR)
+    f = np.array([60, 40, 80, 110, 80, 80, 120, 80, 100, 110, 80, 130, 120, 130, 0.9], float)
+    shut = mouth_open(img, f)
+    img[120:140, 88:114] = (225, 228, 230)                                      # teeth: as bright as the skin, colourless
+    teeth = mouth_open(img, f)
+    img[120:140, 88:114] = (25, 25, 35)                                         # a dark cavity
+    assert shut < 0.05 and teeth > 0.3 and mouth_open(img, f) > 0.3, (shut, teeth, mouth_open(img, f))
     words = [{"text": w, "start": i * 0.5, "end": i * 0.5 + 0.4, "type": "word"}
              for i, w in enumerate("over ten thousand people asked. it renders every frame. then it learns.".split())]
     visuals = [{"word": "over", "nth": 1, "kind": "anim", "type": "likes", "hold_s": 2.0, "props": {"counts": [{"n": 0}]}},
@@ -873,6 +886,235 @@ def demo():
     print("demo ok")
 
 
+# ---------------------------------------------------------------- the kit engine
+# A clip per beat on reelcut's kit (kit/: Apple springs, iPhone and Mac UI, Clawd), placed where the beat plays:
+# half the screen (a mixed edit's panel, 10:7), behind the speaker (cut out in front) or a cutaway (the clip alone).
+KIT = SKILL / "kit"
+KIT_SIZES = {"panel": (1200, 840), "background": (1080, 1920), "cutaway": (1080, 1920)}
+KIT_GROUND = "#F4F4F2"          # the edit's half-screen ground: the clip and the panel are one surface
+KIT_FONTS = (("Inter Tight", "inter-tight", (("inter-tight-normal.woff2", "normal", "100 900"), ("inter-tight-italic.woff2", "italic", "100 900"))),
+             ("Instrument Serif", "instrument-serif", (("instrument-serif-normal-400.woff2", "normal", "400"), ("instrument-serif-italic-400.woff2", "italic", "400"))),
+             ("JetBrains Mono", "jetbrains-mono", (("jetbrains-mono-normal.woff2", "normal", "100 800"),)))
+
+
+def kit_assets(d):
+    """Copy the kit into a clip's assets/: kit.css and kit.js (the core, then every ui/ family in name order), the
+    fonts with their @font-face rules, GSAP."""
+    a = d / "assets"
+    (a / "fonts").mkdir(parents=True, exist_ok=True)
+    ui = sorted((KIT / "ui").iterdir())
+    (a / "kit.css").write_text("\n".join([(KIT / "kit.css").read_text(encoding="utf-8")] +
+                                         [f"/* ui/{f.name} */\n{f.read_text(encoding='utf-8')}" for f in ui if f.suffix == ".css"]), encoding="utf-8")
+    (a / "kit.js").write_text("\n".join([(KIT / "kit.js").read_text(encoding="utf-8")] +
+                                        [f"/* ui/{f.name} */\n{f.read_text(encoding='utf-8')}" for f in ui if f.suffix == ".js"]), encoding="utf-8")
+    faces = []
+    for fam, folder, files in KIT_FONTS:
+        for f, style, weight in files:
+            shutil.copy(KIT / "fonts" / folder / f, a / "fonts" / f)
+            faces.append(f"@font-face {{ font-family: '{fam}'; font-style: {style}; font-weight: {weight}; font-display: block; "
+                         f"src: url('fonts/{f}') format('woff2'); }}")
+    (a / "fonts.css").write_text("\n".join(faces) + "\n", encoding="utf-8")
+    gsap = home() / "motion" / "node_modules" / "gsap" / "dist" / "gsap.min.js"
+    if gsap.exists():
+        shutil.copy(gsap, a / "gsap.min.js")
+
+
+def cut_words(edit):
+    return [w for w in json.loads((Path(edit) / "captions.json").read_text(encoding="utf-8")) if w.get("type", "word") == "word"]
+
+
+def scaffold(edit, cid, layout, t0, dur, images=(), line=""):
+    """A kit clip's folder: motion/<id>/ with index.html (the template, its words on the clip's clock: t=0 is cut time
+    t0), assets/ (the kit, the edit's logos, the images named), hyperframes.json, beat.json ("engine": "kit")."""
+    edit = Path(edit).resolve()
+    if layout not in KIT_SIZES:
+        sys.exit(f"ERROR: layout is one of {', '.join(KIT_SIZES)}")
+    d = edit / "motion" / cid
+    kit_assets(d)
+    for f in list((edit / "images").glob("logo-*.svg")) + [edit / "images" / i for i in images]:
+        if f.exists():
+            shutil.copy(f, d / "assets" / f.name)
+    shutil.copy(SKILL / "template" / "hyperframes.json", d / "hyperframes.json")
+    w, h = KIT_SIZES[layout]
+    said = [{"w": x["text"], "start": round(x["start"] - t0, 3), "end": round(x["end"] - t0, 3)} for x in cut_words(edit)
+            if t0 - 0.05 <= x["start"] < t0 + dur]
+    if not (d / "index.html").exists():   # never clobber a clip being built
+        page = (KIT / "clip.html").read_text(encoding="utf-8")
+        for k, v in {"__ID__": cid, "__W__": w, "__H__": h, "__DUR__": f"{dur:.2f}", "__GROUND__": KIT_GROUND,
+                     "__WORDS__": json.dumps(said, ensure_ascii=False)}.items():
+            page = page.replace(k, str(v))
+        (d / "index.html").write_text(page, encoding="utf-8")
+    beat = {"id": cid, "engine": "kit", "clock": "cut", "type": "video_card", "start": t0, "dur": dur, "size": [w, h], "layout": layout,
+            "line": line, "words": [{"w": x["w"], "t": x["start"]} for x in said], **({"panel": True} if layout == "panel" else {})}
+    (d / "beat.json").write_text(json.dumps(beat, indent=1, ensure_ascii=False), encoding="utf-8")
+    import fcntl   # several scaffolds at once: beats.json is rebuilt from every beat.json under a lock
+    root = edit / "motion"
+    with open(root / ".beats.lock", "w") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        beats = sorted((json.loads(f.read_text(encoding="utf-8")) for f in root.glob("*/beat.json")), key=lambda b: b["start"])
+        tmp = root / "beats.json.tmp"
+        tmp.write_text(json.dumps({"clock": "cut", "look": {"ground": KIT_GROUND}, "beats": beats}, indent=1, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(root / "beats.json")
+    print(f"{d}  {layout} {w}x{h}  t0 {t0}  {dur} s  words: " + " ".join(f"{x['w']}@{x['start']:.2f}" for x in said))
+    return d
+
+
+def first_word(words, t0):
+    """(word, nth, time): the first word said once a clip has begun. Its card starts on it (0.1 s early), so the clip
+    plays from its own start and half-screen clips sit back to back (a later word left the panel empty between)."""
+    norm = lambda s: re.sub(r"[^\w]+", "", s.lower())
+    for i, w in enumerate(words):
+        if w["start"] >= t0 + 0.02:
+            return w["text"], sum(1 for x in words[:i + 1] if norm(x["text"]) == norm(w["text"])), w["start"]
+    return None
+
+
+def place_kit(edit):
+    """Every passed kit clip becomes a visuals.json beat: its render in images/ (named by its hash, so edit.py patch
+    re-renders only what changed), half the screen / behind the speaker / a cutaway, held to the clip's end. A beat
+    or image whose word falls inside a clip is left out (kept in visuals.before-kit.json / images.before-kit.json)."""
+    edit = Path(edit)
+    words = cut_words(edit)
+    clips = sorted((json.loads(f.read_text(encoding="utf-8")) for f in (edit / "motion").glob("*/beat.json")), key=lambda b: b["start"])
+    clips = [b for b in clips if b.get("engine") == "kit"]
+    beats, spans, t0s = [], [], {}
+    import hashlib
+    for b in clips:
+        d = edit / "motion" / b["id"]
+        g = json.loads((d / "gates.json").read_text(encoding="utf-8")) if (d / "gates.json").exists() else {}
+        render = d / "renders" / "clip.mp4"
+        if not g.get("pass") or not render.exists():
+            print(f"  {b['id']}: not passed, not placed")
+            continue
+        tag = hashlib.sha256(render.read_bytes()).hexdigest()[:8]
+        for old in (edit / "images").glob(f"motion-{b['id']}-*.mp4"):
+            old.unlink()
+        (edit / "images").mkdir(exist_ok=True)
+        dst = edit / "images" / f"motion-{b['id']}-{tag}.mp4"
+        shutil.copy(render, dst)
+        fw = first_word(words, b["start"])
+        if not fw:
+            continue
+        word, nth, wt = fw
+        end = b["start"] + b["dur"]
+        beats.append({"word": word, "nth": nth, "kind": "anim", "type": "video_card", "hold_s": round(end - (wt - CARD_LEAD_S), 2),
+                      "props": {"src": f"images/{dst.name}", "size": b["size"], "start_s": 0.0, "motion": b["id"], **({"bare": True} if b["layout"] == "panel" else {})},
+                      "motion": b["id"], "layout": "split" if b["layout"] == "panel" else "background", **({"cutaway": True} if b["layout"] == "cutaway" else {})})
+        spans.append((b["start"], end))
+        t0s[b["id"]] = b["start"]
+    inside = lambda v: (lambda t: t is not None and any(a <= t < z for a, z in spans))(word_time(words, v.get("word"), v.get("nth", 1)) if v.get("word") else None)
+    for name in ("visuals.json", "images.json"):
+        f = edit / name
+        old = json.loads(f.read_text(encoding="utf-8")) if f.exists() else []
+        if f.exists() and not (edit / name.replace(".json", ".before-kit.json")).exists():
+            shutil.copy(f, edit / name.replace(".json", ".before-kit.json"))
+        keep = [v for v in old if not v.get("motion") and not inside(v)]
+        new = keep + (beats if name == "visuals.json" else [])
+        f.write_text(json.dumps(new, indent=1, ensure_ascii=False), encoding="utf-8")
+    (edit / "motion" / "t0.json").write_text(json.dumps(t0s, indent=1), encoding="utf-8")
+    print(f"placed {len(beats)} kit clip(s) in visuals.json; plan.py, then motion.py align, then plan.py again")
+    return beats
+
+
+def align(edit):
+    """After plan.py: each kit clip plays from where the plan started its card (start_s = card start - the clip's t0),
+    so its parts land on their words. Then plan.py again."""
+    edit = Path(edit)
+    t0s = json.loads((edit / "motion" / "t0.json").read_text(encoding="utf-8"))
+    plan = json.loads((edit / "plan.json").read_text(encoding="utf-8"))
+    starts = {((c.get("anim") or {}).get("props") or {}).get("motion"): c["start"] for c in plan["cards"]}
+    vf = edit / "visuals.json"
+    vis = json.loads(vf.read_text(encoding="utf-8"))
+    for v in vis:
+        m = v.get("motion")
+        if m in t0s and m in starts:
+            v["props"]["start_s"] = round(max(0.0, starts[m] - t0s[m]), 3)
+            print(f"  {m:<14} card {starts[m]:6.2f} s  start_s {v['props']['start_s']:.2f}")
+    vf.write_text(json.dumps(vis, indent=1, ensure_ascii=False), encoding="utf-8")
+
+
+def mouth_open(img, f):
+    """How open the mouth is in one YuNet face (px row: box, eyes, nose, mouth corners): the share of the strip
+    between the mouth corners that is a dark cavity or bright teeth, against the face's own skin. 0 is closed."""
+    import numpy as np
+    (rx, ry), (lx, ly) = f[10:12], f[12:14]
+    w = max(8.0, lx - rx)
+    x0, x1 = int(rx + 0.1 * w), int(lx - 0.1 * w)
+    y0, y1 = int(min(ry, ly) - 0.18 * w), int(max(ry, ly) + 0.3 * w)
+    crop = img[max(0, y0):max(0, y1), max(0, x0):max(0, x1)]
+    if crop.size == 0:
+        return 1.0
+    import cv2
+    v = crop.max(axis=2).astype(float)
+    sat = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)[..., 1] / 255.0
+    fx, fy, fw, fh = (int(x) for x in f[:4])
+    skin = float(np.median(img[max(0, fy + fh // 3):fy + fh // 2, max(0, fx + fw // 4):fx + 3 * fw // 4].max(axis=2)))
+    # a cavity is dark; teeth are colourless (lips and skin are warm): in a bright face they are no brighter than skin
+    return float(((v < 0.45 * skin) | ((sat < 0.16) & (v > 0.55 * skin))).mean())
+
+
+def portrait_frames(edit, step=0.25):
+    """(t, score) for the speaker every `step` s: the mouth closed scores most, then the head level (eyes), centred
+    and at its usual size. Frames read at full size (the mouth is a few dozen px), YuNet as face.py runs it."""
+    import cv2
+    import numpy as np
+    sys.path.insert(0, str(SKILL.parent / "edit" / "scripts"))
+    import face as facemod
+    W, H = 1080, 1920
+    det = facemod.detector(W, H)
+    pr = subprocess.Popen(["ffmpeg", "-v", "error", "-i", str(Path(edit) / "cut.mp4"), "-vf", f"fps={1 / step},scale={W}:{H}",
+                           "-f", "rawvideo", "-pix_fmt", "bgr24", "-"], stdout=subprocess.PIPE)
+    rows, n = [], 0
+    while True:
+        buf = pr.stdout.read(W * H * 3)
+        if len(buf) < W * H * 3:
+            break
+        img = np.frombuffer(buf, np.uint8).reshape(H, W, 3)
+        _, faces = det.detect(img)
+        if faces is not None and len(faces):
+            f = max(faces, key=lambda r: r[2] * r[3])
+            tilt = abs(f[7] - f[5]) / max(1.0, abs(f[6] - f[4]))
+            rows.append((round(n * step, 2), mouth_open(img, f), (f[0] + f[2] / 2) / W, f[2] / W, tilt))
+        n += 1
+    pr.stdout.close()
+    pr.wait()
+    if not rows:
+        return []
+    size = float(np.median([r[3] for r in rows]))
+    return sorted(((t, -4 * mo - 2 * abs(cx - 0.5) - 3 * abs(sz - size) / size - 2 * tl) for t, mo, cx, sz, tl in rows if t >= 0.5),
+                  key=lambda x: -x[1])
+
+
+def portrait(edit, at=None):
+    """A calm frame of the speaker for avatars and thumbnails: the mouth closed, the head level, centred, at its usual
+    size (portrait_frames), or --at T. Writes images/avatar.jpg (480 px square round the face, for a round crop) and
+    images/portrait-9x16.jpg (the whole frame, 540x960). Look at both: another moment is --at T (the next best
+    moments are printed)."""
+    edit = Path(edit)
+    face = json.loads((edit / "face.json").read_text(encoding="utf-8"))
+    if at is None:
+        ranked = portrait_frames(edit)
+        if not ranked:
+            sys.exit("ERROR: no face found in cut.mp4")
+        t = ranked[0][0]
+        print("next best: " + ", ".join(f"{x[0]:.2f} s" for x in ranked[1:6]))
+    else:
+        t = at
+    h = min((x for x in face["heads"] if x.get("box")), key=lambda x: abs(x["t"] - t))
+    x, y, w, hh = h["box"]
+    W, H = 1080, 1920
+    s = min(W, max(w / 100 * W, hh / 100 * H) * 1.05)
+    cx, cy = (x + w / 2) / 100 * W, (y + hh / 2) / 100 * H
+    x0, y0 = int(min(max(0, cx - s / 2), W - s)), int(min(max(0, cy - s / 2 - s * 0.04), H - s))
+    (edit / "images").mkdir(exist_ok=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{t:.2f}", "-i", str(edit / "cut.mp4"), "-frames:v", "1", "-vf",
+                    f"scale={W}:{H},crop={int(s)}:{int(s)}:{x0}:{y0},scale=480:480", "-q:v", "2", str(edit / "images" / "avatar.jpg")], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{t:.2f}", "-i", str(edit / "cut.mp4"), "-frames:v", "1", "-vf", "scale=540:960",
+                    "-q:v", "2", str(edit / "images" / "portrait-9x16.jpg")], check=True)
+    print(f"portrait at {t:.2f} s -> images/avatar.jpg, images/portrait-9x16.jpg (look at both; another moment: --at T)")
+    return t
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -901,6 +1143,19 @@ def main():
     lb = sub.add_parser("library")
     lb.add_argument("action", nargs="?", default="list", choices=["list", "archive", "unarchive", "use"])
     lb.add_argument("id", nargs="?")
+    k = sub.add_parser("scaffold", help="a kit clip's folder (references/kit-clips.md)")
+    k.add_argument("edit")
+    k.add_argument("id")
+    k.add_argument("layout", choices=list(KIT_SIZES))
+    k.add_argument("t0", type=float)
+    k.add_argument("dur", type=float)
+    k.add_argument("--images", default="", help="comma-separated files from the edit's images/ the clip uses")
+    k.add_argument("--line", default="")
+    sub.add_parser("place-kit").add_argument("edit")
+    sub.add_parser("align").add_argument("edit")
+    po = sub.add_parser("portrait")
+    po.add_argument("edit")
+    po.add_argument("--at", type=float)
     sub.add_parser("demo")
     a = ap.parse_args()
     if a.cmd == "pick":
@@ -923,6 +1178,14 @@ def main():
             lib_set(a.id, archived={"archive": True, "unarchive": False}.get(a.action), use=True if a.action == "use" else None)
     elif a.cmd == "strips":
         strips(a.video, [float(x) for x in a.at.split(",")], a.out, a.before, a.after, a.fps, a.safe)
+    elif a.cmd == "scaffold":
+        scaffold(a.edit, a.id, a.layout, a.t0, a.dur, [i for i in a.images.split(",") if i], a.line)
+    elif a.cmd == "place-kit":
+        place_kit(a.edit)
+    elif a.cmd == "align":
+        align(a.edit)
+    elif a.cmd == "portrait":
+        portrait(a.edit, a.at)
     else:
         demo()
 

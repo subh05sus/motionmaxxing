@@ -64,6 +64,26 @@ def spread(c):
     return (c.get("anim") or {}).get("type") == "logo_cluster" or c.get("box") == [0, 0, 100, 100] and c.get("layout") != "scene"
 
 
+def motion_findings(plan, style):
+    """A style that asks for motion graphics (style.json motion: engine "clips", amount over 0) and an edit with none
+    went out as screenshots on a talking head: a FAIL, never a quiet fallback. Far fewer clips than the amount asks
+    for (amount x the sentences, half of it at least): a WARN."""
+    m = (style or {}).get("motion") or {}
+    if m.get("engine", "clips") != "clips" or not (m.get("amount") or 0) > 0:
+        return []
+    clips = [c for c in plan["cards"] if ((c.get("anim") or {}).get("props") or {}).get("motion")]
+    lines = sum(1 for c in plan["captions"]["chunks"] if re.search(r"[.!?]$", c["text"].strip())) or 1
+    fix = ("run the motion skill: a kit clip per beat (motion.py scaffold, check, place-kit; plan.py, motion.py align, "
+           "plan.py), then render")
+    if not clips:
+        return [finding("FAIL", None, f"the style asks for motion graphics (motion.amount {m['amount']}) and the edit has none: "
+                        "screenshots on a talking head", fix)]
+    if len(clips) < 0.5 * m["amount"] * lines:
+        return [finding("WARN", None, f"{len(clips)} motion clip(s) for {lines} sentences; the style asks for about "
+                        f"{round(m['amount'] * lines)} (motion.amount {m['amount']})", fix)]
+    return []
+
+
 def finding(level, t, what, fix):
     return {"level": level, "t": None if t is None else round(t, 2), "what": what, "fix": fix}
 
@@ -862,6 +882,11 @@ def style_note(path, style):
 
 def demo():
     import tempfile
+    # a style asking for motion and an edit with none fails; enough clips pass; a templates style is not asked
+    mp = {"cards": [], "captions": {"chunks": [{"text": "Eins."}, {"text": "Zwei."}]}}
+    assert [f["level"] for f in motion_findings(mp, {"motion": {"engine": "clips", "amount": 0.6}})] == ["FAIL"]
+    assert motion_findings({**mp, "cards": [{"anim": {"props": {"motion": "01-a"}}}]}, {"motion": {"engine": "clips", "amount": 0.6}}) == []
+    assert motion_findings(mp, {"motion": {"engine": "templates", "amount": 0.6}}) == [] and motion_findings(mp, {}) == []
     # the panel (StyleEdit.tsx panelOpen): a mixed edit opens it only for its marked cards, across a short gap, and
     # moves over 0.6 s; a split style opens it for every card but backgrounds and scenes
     mixed = {"layout": {"mode": "split"}, "cards": [{"start": 10, "end": 12, "panel": True}, {"start": 12.8, "end": 14, "panel": True},
@@ -1206,6 +1231,7 @@ def main():
         found += user_assets(edit, plan, rd("visuals.json") or [])
         found += music_findings(str(edit), plan, style, prof())
         found += style_pick(edit, rd("style.json") or {})
+        found += motion_findings(plan, style)
     else:
         video = edit / f"render{tag}.mp4"
         if not video.exists():

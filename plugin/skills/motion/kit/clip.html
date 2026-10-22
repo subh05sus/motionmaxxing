@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=__W__, height=__H__" />
+<script src="assets/gsap.min.js"></script>
+<link rel="stylesheet" href="assets/fonts.css" />
+<link rel="stylesheet" href="assets/kit.css" />
+<script src="assets/kit.js"></script>
+<style>
+  html, body { margin: 0; width: __W__px; height: __H__px; overflow: hidden; background: __GROUND__; }
+  #root { width: __W__px; height: __H__px; --ground: __GROUND__; }
+  #root .cam { position: absolute; inset: 0; }
+  /* the beat's own CSS */
+</style>
+</head>
+<body>
+<!-- A kit clip (motion skill, references/kit-clips.md): reelcut's kit (Apple springs and UI, Clawd) on the edit's
+     ground. Author the beat inside .cam and its timeline below; RC.word("…") is when that word is said. -->
+<div id="root" data-hyperframes-root data-look="paper" data-composition-id="__ID__" data-start="0" data-duration="__DUR__"
+     data-width="__W__" data-height="__H__">
+  <div class="cam">
+    <!-- real-text: name the speaker's words the text shows -->
+  </div>
+</div>
+<script>
+  // the line's words on this clip's clock (t=0 is the card's first frame)
+  window.__rcVoice = { words: __WORDS__, rms: [], fps: 30 };
+  var DURATION = __DUR__;
+  window.__timelines = window.__timelines || {};
+  (function () {
+    var tl = gsap.timeline({ paused: true });
+    // the beat: entrances on their words, something moving until the end
+    RC.camera(tl, "#root .cam", 0, { duration: DURATION });
+    RC.hold(tl, DURATION);
+    window.__timelines["__ID__"] = tl;
+  })();
+</script>
+</body>
+</html>

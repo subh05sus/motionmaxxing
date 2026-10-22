@@ -95,7 +95,10 @@ rules, then the default look and motion (built animations over captures, big in 
 3. **Fill the overlays:** for the overlay picks, write only the props (`references/shapes.md`). Hand it to the `template-filler` agent (haiku) with the full path of `references/shapes.md` when available, else write them. Only
    words and numbers the speaker said. There are no type cards.
 4. **Fetch:** `node "$S/capture.mjs" edits/<name>` fetches captures, logos, posts into `images/`, marks measured.
-5. **Motion:** moving-template beats become bespoke clips (motion skill); a failed clip keeps its card.
+5. **Motion:** when the style asks for motion (style.json `motion.engine` "clips", `amount` over 0, the default for a
+   vertical edit), the motion skill's kit engine builds a clip for most lines, here in this session (the motion skill,
+   `references/kit-clips.md`: scaffold, write, check, `place-kit`, plan, `align`, plan). check.py plan FAILs an edit
+   whose style asks for motion and that has none. A zoomed website crop is never a visual: build the idea as a clip.
 
 **Where each visual sits: Claude picks per beat** (in visuals.json or images.json). The big placements make it look
 edited; a small box is the quiet one:
@@ -105,12 +108,14 @@ edited; a small box is the quiet one:
 | behind the speaker, background removed | `"layout": "background"` | the speaker cut out (matte.py) in front of a picture or clip filling the frame: b-roll, a product, a page, a place. The host stays on screen |
 | half the screen (9:16) | `"layout": "split"` | a page or app to read, a chart, steps: the visual on top, the speaker in the window below. Only these beats open the panel |
 | the whole screen | `"layout": "scene"` | a motion graphic, a demo recording, a b-roll cut-away (1.5-4 s) |
+| the clip alone, full screen (a kit clip) | `"layout": "background", "cutaway": true` | a phone moment (a lock screen, a call): no cutout, about 2 s or more |
 | a small box | nothing (the default), or `"box": [x, y, w, h]` in % | a logo, a post, a detail; above the head |
 | a card tucked behind the hair | `"layer": "behind"` with a box | a capture that rises behind the head |
 
 Rules: at most 40% of the visuals in a small box (logos apart); check.py plan FAILs more. At least one background and
 one half-screen beat in a video with four or more visuals, when the line fits. Never the same placement more than
-three beats in a row; the face comes back at least every 8 s. After a background beat (or a tucked card) is planned,
+three beats in a row; the face comes back at least every 8 s (half-screen kit clips keep it in the window below).
+Not too fast: never more than three layout changes in ten seconds. After a background beat (or a tucked card) is planned,
 run `matte.py` (it cuts only new frames). Captions: plan.py puts them under the chin, or over the head when the chin is
 too low for the app's bottom UI, always inside the safe zone; never set `captions.y_pct` by hand (check.py plan FAILs
 captions on the face or under the app's UI).
