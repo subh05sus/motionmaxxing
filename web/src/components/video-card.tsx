@@ -9,6 +9,8 @@ import { ago, clock, cn } from "@/lib/utils";
 
 export interface VideoSummary {
   id: string; title: string; createdAt: string; updatedAt: string; stage: "cut" | "edit" | "done"; status: string; lang?: string;
+  /** What runs on it now, whatever its stage (a render after approval too): the server sees the process. */
+  working?: { step: string; detail?: string; progress?: number } | null;
   seconds: { source?: number; cut?: number }; media: { source?: string; cut?: string; render?: string; poster?: string };
   progress?: { step: string; detail?: string; progress?: number; t: number; done?: boolean; failed?: string }; session?: string;
 }
@@ -28,7 +30,7 @@ export interface CardActions { rename: (id: string, title: string) => void; del:
 export function VideoCard({ v, index = 0, actions, selecting, selected, onSelect }: { v: VideoSummary; index?: number; actions?: CardActions;
   selecting?: boolean; selected?: boolean; onSelect?: (on: boolean) => void }) {
   const st = STATUS[v.status] ?? STATUS.new!;
-  const working = v.status === "transcribing" || v.status === "cutting" || v.status === "making";
+  const working = !!v.working || v.status === "transcribing" || v.status === "cutting" || v.status === "making";
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const href = `/videos/${encodeURIComponent(v.id)}`;
   const items = actions ? [

@@ -1,8 +1,8 @@
-import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { execFile, execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import { EDITS, slug } from "./paths.js";
+import { EDITS, LIBRARY, slug } from "./paths.js";
 
 const run = promisify(execFile);
 
@@ -103,9 +103,93 @@ export function rendering(id: string): boolean {
   catch { return false; }
 }
 
-/** What exists so far, in plain words: the stage a person sees. "editing" is the edit ready to watch. */
+// --- what is running on a video right now -------------------------------------------------------------------------
+// The plugin's scripts and renderers in the process list, whoever started them (the studio, Claude's Bash in the
+// background, a terminal). A render after the edit was approved ran with nothing on the page: the status said
+// "approved", and the newest progress line alone cannot tell a step still running from one that ended minutes ago.
+
+interface Proc { pid: number; cmd: string; cwd?: string }
+let procCache: { at: number; procs: Proc[] } | null = null;
+const OURS = /motionmaxxing|remotion|hyperframes|whisper-cli|ffmpeg|render\.mjs|capture\.mjs|recorder\.mjs/;
+
+/** The processes that may work on an edit, with their working folders (a relative edits/<id> resolves against it). */
+function procs(): Proc[] {
+  if (procCache && Date.now() - procCache.at < 1500) return procCache.procs;
+  let list: Proc[] = [];
+  try {
+    list = execFileSync("ps", ["-axo", "pid=,command="], { encoding: "utf8", maxBuffer: 8 << 20 }).split("\n")
+      .map((l) => /^\s*(\d+)\s+(.*)$/.exec(l)).filter((m): m is RegExpExecArray => !!m)
+      .map((m) => ({ pid: Number(m[1]), cmd: m[2]! }))
+      .filter((p) => p.pid !== process.pid && OURS.test(p.cmd) && !/\bps -axo\b|src\/server\/main\.ts|claude-agent-sdk/.test(p.cmd));
+    if (list.length) {
+      let out = "";
+      try { out = execFileSync("lsof", ["-a", "-d", "cwd", "-Fpn", "-p", list.map((p) => p.pid).join(",")], { encoding: "utf8" }); }
+      catch (e) { out = String((e as { stdout?: string }).stdout ?? ""); }   // a process that ended meanwhile: lsof exits 1
+      let pid = 0;
+      for (const l of out.split("\n")) {
+        if (l.startsWith("p")) pid = Number(l.slice(1));
+        else if (l.startsWith("n")) { const p = list.find((x) => x.pid === pid); if (p) p.cwd = l.slice(1); }
+      }
+    }
+  } catch { list = []; }   // no ps (never on a Mac): only the render log tells
+  procCache = { at: Date.now(), procs: list };
+  return list;
+}
+
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// lsof gives a working folder as its real path (/private/var/... for /var/...): compare real paths
+const real = (f: string) => { try { return realpathSync(f); } catch { return path.resolve(f); } };
+/** Does this process work on the edit folder d: d in its arguments, edits/<id> run from the library, or run inside d. */
+function on(p: Proc, d: string, id: string): boolean {
+  const rd = real(d);
+  if (p.cwd && (p.cwd === rd || p.cwd.startsWith(rd + path.sep))) return true;
+  if ([...new Set([d, rd])].some((x) => new RegExp(`${esc(x)}(?=$|[/\\s'"])`).test(p.cmd))) return true;
+  return !!p.cwd && p.cwd === real(LIBRARY) && new RegExp(`(?:^|[\\s'"=])(?:\\./)?edits/${esc(id)}(?=$|[/\\s'"])`).test(p.cmd);
+}
+
+// a running script -> the step to show, and the progress steps that script writes (their detail and bar are its own)
+const LABELS: [RegExp, string, string[]][] = [
+  [/render\.mjs|remotion|edit\.py\s+(?:render|patch)/, "Making the video", ["Making the video"]],
+  [/edit\.py\s+stills/, "Making the stills", []],
+  [/check\.py\s+render/, "Checking the video", []],
+  [/check\.py/, "Checking the plan", []],
+  [/motion\.py\s+check|hyperframes/, "Making a motion clip", []],
+  [/matte\.py/, "Cutting you out for the background", []],
+  [/face\.py/, "Finding your face", []],
+  [/plan\.py/, "Planning zooms, cards and sound", ["Planning zooms, cards and sound"]],
+  [/sound\.py/, "Sound effects and music", ["Sound effects and music"]],
+  [/retakes\.py\s+captions/, "Writing the captions", ["Writing the captions"]],
+  [/transcribe\.py|whisper-cli/, "Writing down every word",
+    ["Writing down every word", "Hearing the take again, word for word", "Finding retakes and pauses", "Transcribed every word"]],
+  [/rehear\.py|verify_cut\.py|splice_check\.py/, "Checking the cut", ["Checking the cut"]],
+  [/join\.py/, "Joining your clips", ["Joining your clips"]],
+  [/build_timeline\.py|edits\.py/, "Cutting out the mistakes", ["Cutting out the mistakes"]],
+  [/cut\/scripts\/render\.py/, "Rendering the cut", ["Rendering the cut"]],
+  [/export_nle\.py/, "Exporting", []],
+  [/capture\.mjs/, "Capturing a page", []],
+  [/recorder\.mjs/, "Recording a demo", []],
+];
+
+/** What runs on this video now, for the page: the render (its frame count), else the script working on its folder
+ *  (the most telling one, with its own progress line's detail). null: nothing runs. */
+export function working(id: string): { step: string; detail?: string; progress?: number } | null {
+  const d = editDir(id), prog = lastProgress(id);
+  if (rendering(id)) return { step: "Making the video", detail: prog?.step === "Making the video" ? prog.detail : undefined,
+    progress: prog?.step === "Making the video" ? prog.progress : undefined };
+  const live = procs().filter((p) => on(p, d, id));
+  if (!live.length) return null;
+  const fresh = prog && !prog.done && !prog.failed && Date.now() / 1000 - prog.t < 900 ? prog : undefined;
+  const hit = LABELS.find(([re]) => live.some((p) => re.test(p.cmd)));
+  if (hit && fresh && hit[2].includes(fresh.step)) return { step: fresh.step, detail: fresh.detail, progress: fresh.progress };
+  if (hit) return { step: hit[1] };
+  return fresh ? { step: fresh.step, detail: fresh.detail, progress: fresh.progress } : { step: "Working on it" };
+}
+
+/** What exists so far, in plain words: the stage a person sees. "editing" is the edit ready to watch. Something
+ *  running comes first: an approved video being re-rendered is being made again, not "approved". */
 export function status(id: string): "new" | "transcribing" | "cutting" | "ready" | "making" | "editing" | "approved" {
   const d = editDir(id), r = record(id);
+  if (working(id)) return r.approved?.cut || r.stage !== "cut" ? "making" : existsSync(path.join(d, "words.raw.json")) ? "cutting" : "transcribing";
   if (r.stage === "done" || r.approved?.edit) return "approved";
   if (rendering(id)) return "making";
   const render = mtime(path.join(d, "render.mp4"));
@@ -133,7 +217,8 @@ export function summary(id: string) {
   return {
     id, title: r.title, createdAt: r.createdAt, updatedAt: new Date(updated || Date.parse(r.createdAt)).toISOString(),
     stage: r.stage, approved: r.approved ?? {}, status: status(id), lang: lang(id),
-    seconds: { source: report.duration, cut: report.final_s }, media: media(id), progress: lastProgress(id), session: r.session,
+    seconds: { source: report.duration, cut: report.final_s }, media: media(id), progress: lastProgress(id), working: working(id),
+    session: r.session,
   };
 }
 
@@ -152,7 +237,8 @@ export function list() {
 const WATCHED = ["studio.json", "progress.jsonl", "render.renderer.log", "render.mp4", "cut.mp4", "plan.json", "decisions.json",
   "words.raw.json", "notes.json"];
 /** A cheap fingerprint of a video (its files' times): when it changes, the open pages reload it. */
-export const signature = (id: string): string => WATCHED.map((f) => mtime(path.join(editDir(id), f))).join(",");
+// a script starting or ending on the video changes it too, with no file written yet
+export const signature = (id: string): string => WATCHED.map((f) => mtime(path.join(editDir(id), f))).join(",") + `|${working(id)?.step ?? ""}`;
 
 /** A word plays when at least 0.1 s of it (or half, if shorter) is inside a kept span (build_timeline.is_kept). */
 export function isKept(w: { start: number; end: number }, spans: { start: number; end: number }[]): boolean {

@@ -305,7 +305,10 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
     catch (e) { alert((e as Error).message); }
     finally { setSaving(false); reload(); }
   };
-  const working = !!v?.job || v?.progress && !v.progress.done && !v.progress.failed && Date.now() / 1000 - v.progress.t < 900 && (v.status === "transcribing" || v.status === "cutting" || v.status === "making");
+  // the server sees a render or a script running on this video whatever its stage (a re-render after approval too);
+  // between Claude's steps, the newest progress line of a stage still under way keeps the pill up
+  const working = !!v?.job || !!v?.working || v?.progress && !v.progress.done && !v.progress.failed && Date.now() / 1000 - v.progress.t < 900 && (v.status === "transcribing" || v.status === "cutting" || v.status === "making");
+  const doing = v?.working ?? v?.progress;
   const wide = useMediaQuery("(min-width: 1024px)");
   const [phoneTab, setPhoneTab] = useState<"notes" | "claude">("notes");
   const [more, setMore] = useState<{ x: number; y: number } | null>(null);
@@ -326,7 +329,7 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
     setTitle(
       <span className="flex items-center gap-2"><span className="truncate">{v.title}</span><span className="hidden caption font-normal sm:inline">{STATUS[v.status]?.label}</span></span>,
       <div className="flex items-center gap-2">
-        {working && v.progress && <span className="hidden items-center gap-1.5 caption xl:flex"><Loader2 className="size-3 animate-spin text-primary" />{v.progress.step}{v.progress.detail ? ` · ${v.progress.detail}` : ""}</span>}
+        {working && doing && <span className="hidden items-center gap-1.5 caption xl:flex"><Loader2 className="size-3 animate-spin text-primary" />{doing.step}{doing.detail ? ` · ${doing.detail}` : ""}</span>}
         {wide && cutView}
         {v.status === "new" && !v.chat && <Link href={`/new?video=${encodeURIComponent(id)}`} className="flex h-7 items-center rounded-md bg-primary px-3 font-medium text-primary-foreground active:scale-[0.97]">Make the cut</Link>}
         {hasCut && v.status === "ready" && (
@@ -355,7 +358,7 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
   const openNotes = v.notes.filter((n) => !n.sent).length;
   const cutNow = onCut ? now : maps.toCut(now);
   const progressPill = working && (
-    <div className="absolute top-6 left-1/2 -translate-x-1/2"><div className="liquid-glass liquid-glass-milky flex items-center gap-2 rounded-full px-3 py-1.5 text-[12px] whitespace-nowrap"><Loader2 className="size-3.5 animate-spin text-primary" />{v.progress?.step ?? "Working"}{v.progress?.detail ? ` · ${v.progress.detail}` : ""}</div></div>
+    <div className="absolute top-6 left-1/2 -translate-x-1/2"><div className="liquid-glass liquid-glass-milky flex items-center gap-2 rounded-full px-3 py-1.5 text-[12px] whitespace-nowrap"><Loader2 className="size-3.5 animate-spin text-primary" />{doing?.step ?? "Working"}{doing?.detail ? ` · ${doing.detail}` : ""}</div></div>
   );
 
   // Phone and narrow windows: watch, leave notes, approve (the desktop is where the cut is changed by hand).
