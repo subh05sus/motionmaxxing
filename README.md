@@ -68,6 +68,15 @@ Early, built in phases: [docs/ROADMAP.md](docs/ROADMAP.md).
 | `web/` | The studio's interface: React, Tailwind and Apple's dark palette, glass only on floating controls. |
 | `bin/mm` | Starts and opens the studio; `scripts/make-app.sh` makes the Dock app. |
 
+Each part of a video is made with the engine that does it best:
+
+| Part | Made with | Why |
+|---|---|---|
+| The cut | FFmpeg | Frame-exact pieces of the raw take; nothing is drawn again. |
+| Motion graphics, one clip per beat | HyperFrames and GSAP, on reelcut's kit | Claude writes each clip as a web page (springs, iPhone and Mac UI, Clawd), and every frame is checked before it is used. |
+| The finished video | Remotion | One composition holds the speaker, captions, zooms, layouts, the clips and the sound, frame by frame. |
+| Export | FFmpeg | Finished clips go out as files; nothing is rendered twice. |
+
 ## License
 
 MIT. See [LICENSE](LICENSE), and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the tools it uses.
