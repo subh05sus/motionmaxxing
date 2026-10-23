@@ -104,6 +104,27 @@ async function rebuild(id: string, why: string): Promise<void> {
 
 // --- prompts ------------------------------------------------------------------------------------------------------
 
+/** What the cut and the edit are told about the video's language. */
+function langLine(code: string | undefined, stage: "cut" | "edit"): string[] {
+  const name = code ? lib.LANGS[code] : undefined;
+  if (stage === "cut") {
+    if (!name) return ["- The take's language is heard when it is transcribed (German, English, Hindi or Hinglish; meta.json keeps it).",
+      "  Keep the user's words exactly; a cut only removes."];
+    return [`- The take is ${name}: the user picked it, and transcribe.py reads it from meta.json (or pass \`--lang ${code}\`).`,
+      "  Keep the user's words exactly; a cut only removes.",
+      ...(code === "hi" || code === "hinglish" ? ["  Hindi comes back in Devanagari and English words in Latin letters, and a word can come back in either:",
+        "  the cut compares words by sound, so a retake in the other script still matches its first try."] : [])];
+  }
+  if (code === "hi") return ["- The video is Hindi: captions in Devanagari, the user's words exactly, English words in Latin letters as Whisper",
+    "  wrote them (only spelling fixes with retakes.py fix). Text on screen as the speaker would write it: Hindi in Devanagari,",
+    "  names and English terms in Latin letters (the captions and the kit carry a Devanagari font)."];
+  if (code === "hinglish") return ["- The video is Hinglish: retakes.py captions writes its Hindi words in Roman letters (aaj, karna, nahi). Read",
+    "  captions.txt and fix a spelling that reads oddly with retakes.py fix, to the common Hinglish spelling (\"hai\", \"nahi\",",
+    "  \"kaise\", \"bhai\"): never change a word. Text on screen in Roman letters, Hinglish or English."];
+  return [`- The video is ${name ?? "German"}: captions keep the user's words exactly (only spelling fixes with retakes.py fix).`,
+    `  Text on screen in ${name ?? "German"}.`];
+}
+
 function cutPrompt(id: string, extra: { instructions?: string; script?: string }): string {
   const d = lib.editDir(id), r = lib.record(id);
   return [
@@ -116,7 +137,7 @@ function cutPrompt(id: string, extra: { instructions?: string; script?: string }
     ...(extra.script ? [`- The user's script: ${extra.script} (pass it to transcribe.py and run script_match.py)`] : []),
     "- First `taste.py show --edit` as the skill says: the user's learned cut taste (pause length) is in it.",
     "- A phone or WhatsApp clip has a variable frame rate: make edits/<name>/source.mp4 with join.py first (step 0a), and cut that.",
-    "- The take is usually German: keep the user's words exactly; a cut only removes.",
+    ...langLine(r.lang, "cut"),
     "- Last take wins, unless it is worse. Where takes are close, run takes.py sheets and look at the sheets; still unclear,",
     "  watch the stretch with the motionmaxxing watch skill.",
     "- Always heal the transcript right after transcribing (transcribe.py heal): it finds the retakes Whisper wrote once",
@@ -150,7 +171,7 @@ function editPrompt(id: string): string {
     `- Edit folder: ${d} (cut.mp4, words.json and cut.transcript.json are there)`,
     own ? `- The style: the owner's own measured style, ${path.join(LIBRARY, "creator-teardowns", own, "style.json")} (copy it to style.json), unless the chat named another.`
         : "- The style: step 1 of the skill picks it.",
-    "- The video is German: captions keep the user's words exactly (only spelling fixes with retakes.py fix).",
+    ...langLine(lib.lang(id), "edit"),
     "- Pick the placement per beat and mix them: background (you cut out in front of the visual), half the screen,",
     "  the whole screen, and few small boxes (at most 40%). Real things only: never a text card. Captions are placed by",
     "  plan.py (never on the face, inside the app's safe zone): never set their y by hand.",
@@ -292,6 +313,9 @@ const server = http.createServer(async (req, res) => {
           writeFileSync(script, String(b.script));
           r.script = script;
         }
+        const lang = typeof b.lang === "string" && lib.LANGS[b.lang] ? b.lang : undefined;   // "auto": heard
+        r.lang = lang;
+        lib.setMeta(id, { lang_asked: lang ?? "auto" });
         const sid = `v_${id}`;
         r.session = sid; lib.saveRecord(id, r);
         claude.ensure(sid, r.title, lib.editDir(id));

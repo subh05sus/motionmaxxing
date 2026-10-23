@@ -4044,6 +4044,9 @@ def main():
                     "on needs matte.py before stills")
     a = ap.parse_args()
     edit_dir = Path(a.words).resolve().parent
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+    from mm import lang as L
+    STOP.update(L.pack(L.of(edit_dir)).stop)   # a keyword page never accents "der" or "है": the edit's own stop words too
     video = edit_dir / "cut.mp4"
     if not video.exists():
         sys.exit(f"ERROR: no cut.mp4 in {edit_dir}. Run the cut skill first.")

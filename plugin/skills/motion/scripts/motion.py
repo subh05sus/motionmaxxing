@@ -912,7 +912,10 @@ KIT_SIZES = {"panel": (1200, 840), "background": (1080, 1920), "cutaway": (1080,
 KIT_GROUND = "#F4F4F2"          # the edit's half-screen ground: the clip and the panel are one surface
 KIT_FONTS = (("Inter Tight", "inter-tight", (("inter-tight-normal.woff2", "normal", "100 900"), ("inter-tight-italic.woff2", "italic", "100 900"))),
              ("Instrument Serif", "instrument-serif", (("instrument-serif-normal-400.woff2", "normal", "400"), ("instrument-serif-italic-400.woff2", "italic", "400"))),
-             ("JetBrains Mono", "jetbrains-mono", (("jetbrains-mono-normal.woff2", "normal", "100 800"),)))
+             ("JetBrains Mono", "jetbrains-mono", (("jetbrains-mono-normal.woff2", "normal", "100 800"),)),
+             # Hindi text in a clip: every stack falls back to it for Devanagari only (Inter Tight has none)
+             ("Noto Sans Devanagari", "noto-sans-devanagari", (("noto-sans-devanagari-normal.woff2", "normal", "100 900"),)))
+KIT_FONT_RANGE = {"Noto Sans Devanagari": "U+0900-097F, U+1CD0-1CF9, U+200C-200D, U+20A8, U+20B9, U+25CC, U+A830-A839, U+A8E0-A8FF"}
 
 
 def kit_poses(tag=None):
@@ -936,8 +939,9 @@ def kit_assets(d):
     for fam, folder, files in KIT_FONTS:
         for f, style, weight in files:
             shutil.copy(KIT / "fonts" / folder / f, a / "fonts" / f)
+            rng = f" unicode-range: {KIT_FONT_RANGE[fam]};" if fam in KIT_FONT_RANGE else ""
             faces.append(f"@font-face {{ font-family: '{fam}'; font-style: {style}; font-weight: {weight}; font-display: block; "
-                         f"src: url('fonts/{f}') format('woff2'); }}")
+                         f"src: url('fonts/{f}') format('woff2');{rng} }}")
     (a / "fonts.css").write_text("\n".join(faces) + "\n", encoding="utf-8")
     gsap = home() / "motion" / "node_modules" / "gsap" / "dist" / "gsap.min.js"
     if gsap.exists():

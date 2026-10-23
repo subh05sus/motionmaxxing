@@ -25,7 +25,7 @@ export function DropZone({ onFile, compact, busy, progress }: { onFile: (f: File
         <div className="space-y-1.5">
           <div className="mx-auto grid size-11 place-items-center rounded-full bg-primary/12 text-primary"><Upload className="size-5" /></div>
           <p className="title-2">Drop your raw take</p>
-          <p className="label-2">Every take, every “ähm”. Last take wins. Or click to choose a file.</p>
+          <p className="label-2">Every take, every filler. Last take wins. Or click to choose a file.</p>
         </div>
       )}
     </div>

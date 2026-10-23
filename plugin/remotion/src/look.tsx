@@ -103,18 +103,38 @@ export const shadowOf = (look: Look, u: number) =>
 // Google Fonts does not have (font_findings). A font that is there but fails to load stops the render with
 // its name: drawing system-ui, or no captions, in its place would pass unseen.
 const FALLBACK = "Inter";
+// Hindi captions and titles: a font with its own Devanagari (Poppins, Mukta, Hind) draws it; any other font gets this
+// one behind it in the stack, so Devanagari never falls to whatever the render machine has (tofu on a Linux box)
+const DEVANAGARI = "Noto Sans Devanagari";
 const cache = new Map<string, Promise<string>>();
+const nearest = (have: number[], w: number) => (have.length ? have.reduce((a, b) => (Math.abs(b - w) < Math.abs(a - w) ? b : a)) : w);
+let devaFace: Promise<string> | null = null;
+const loadDevanagari = (): Promise<string> => {
+  if (!devaFace) {
+    const entry = getAvailableFonts().find((f) => f.fontFamily === DEVANAGARI);
+    devaFace = entry ? entry.load().then(async (font) => {
+      const have = Object.keys(font.getInfo().fonts.normal ?? {}).map(Number);
+      const loaded = font.loadFont("normal", { weights: [...new Set([400, 600, 700, 800].map((w) => String(nearest(have, w))))], subsets: ["devanagari"] });
+      await loaded.waitUntilDone();
+      return loaded.fontFamily;
+    }).catch(() => "") : Promise.resolve("");   // a German video still renders when this cannot load
+  }
+  return devaFace;
+};
 export const loadFamily = (name: string | undefined, weights: number[]): Promise<string> => {
   const key = `${name}:${weights.join(",")}`;
   if (!cache.has(key)) {
     const fonts = getAvailableFonts();
     const entry = fonts.find((f) => f.fontFamily === name) ?? fonts.find((f) => f.fontFamily === FALLBACK)!;
     cache.set(key, entry.load().then(async (font) => {
-      const have = Object.keys(font.getInfo().fonts.normal ?? {}).map(Number);
-      const near = (w: number) => (have.length ? have.reduce((a, b) => (Math.abs(b - w) < Math.abs(a - w) ? b : a)) : w);
-      const loaded = font.loadFont("normal", { weights: [...new Set(weights.map((w) => String(near(w))))], subsets: ["latin"] });
+      const info = font.getInfo() as { fonts: Record<string, Record<string, unknown>>; subsets?: string[] };
+      const have = Object.keys(info.fonts.normal ?? {}).map(Number);
+      const deva = (info.subsets ?? []).includes("devanagari");
+      const loaded = font.loadFont("normal", { weights: [...new Set(weights.map((w) => String(nearest(have, w))))],
+        subsets: deva ? ["latin", "devanagari"] : ["latin"] });
       await loaded.waitUntilDone();
-      return `'${loaded.fontFamily}', system-ui, sans-serif`;
+      const behind = deva ? "" : await loadDevanagari();
+      return `'${loaded.fontFamily}', ${behind ? `'${behind}', ` : ""}system-ui, sans-serif`;
     }).catch((e) => {
       cancelRender(new Error(`font '${entry.fontFamily}' did not load: ${e?.message ?? e}`));
       throw e;

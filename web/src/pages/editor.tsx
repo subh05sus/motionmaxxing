@@ -9,6 +9,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { useItemActions } from "@/lib/actions";
 import { navigate } from "@/lib/router";
 import { api, useApi, useEvents } from "@/lib/api";
+import { langName } from "@/lib/langs";
 import { Link } from "@/lib/router";
 import { SPRING_DEFAULT, SPRING_SNAPPY } from "@/lib/motion";
 import { clock, cn } from "@/lib/utils";
@@ -244,7 +245,7 @@ function Notes({ id, notes, now, onSeek, reload }: { id: string; notes: Note[]; 
 function Inspector({ v }: { v: Detail }) {
   const counts = v.transcript.cuts.reduce<Record<string, number>>((m, c) => ({ ...m, [c.kind]: (m[c.kind] ?? 0) + 1 }), {});
   const rows: [string, ReactNode][] = [
-    ["Language", v.lang === "de" ? "German" : v.lang === "en" ? "English" : v.lang ?? "–"],
+    ["Language", langName(v.lang)],
     ["Raw take", clock(v.seconds.source)],
     ["Cut", clock(v.seconds.cut)],
     ["Removed", v.seconds.source && v.seconds.cut ? `${clock(v.seconds.source - v.seconds.cut)} (${Math.round((1 - v.seconds.cut / v.seconds.source) * 100)}%)` : "–"],

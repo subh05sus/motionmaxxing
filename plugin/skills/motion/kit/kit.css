@@ -20,9 +20,9 @@
   --card: #ffffff; --card-ink: #121212; --card-muted: #6b675f; --line: rgba(18,18,18,.09);
   --shadow: 0 1px 0 rgba(0,0,0,.04), 0 24px 60px -18px rgba(20,16,10,.28), 0 8px 18px -8px rgba(20,16,10,.12);
   --glow: rgba(226,86,42,.35);
-  --font-sans: 'Inter Tight', 'Inter', system-ui, sans-serif;
-  --font-serif: 'Instrument Serif', 'Times New Roman', serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-sans: 'Inter Tight', 'Inter', 'Noto Sans Devanagari', system-ui, sans-serif;
+  --font-serif: 'Instrument Serif', 'Times New Roman', 'Noto Sans Devanagari', serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Noto Sans Devanagari', monospace;
   --font-display: var(--font-sans);
   --display-weight: 700; --display-tracking: -0.045em; --display-stretch: 100%; --display-case: none;
   --radius: 22px;

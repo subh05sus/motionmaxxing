@@ -16,7 +16,12 @@ export interface Note { id: string; t: number; text: string; stage: "cut" | "edi
 export interface StudioRecord {
   title: string; createdAt: string; source?: string; script?: string;
   stage: "cut" | "edit" | "done"; approved?: { cut?: string; edit?: string }; session?: string;
+  /** The language picked on New video (plugin/lib/mm/lang.py PACKS); none: heard when transcribed. */
+  lang?: string;
 }
+
+/** The languages the cut reads (plugin/lib/mm/lang.py PACKS). */
+export const LANGS: Record<string, string> = { en: "English", de: "German", hi: "Hindi", hinglish: "Hinglish" };
 export interface Word { i: number; text: string; start: number; end: number; kept: boolean; kind?: string }
 
 const readJson = <T>(p: string, fallback: T): T => { try { return JSON.parse(readFileSync(p, "utf8")) as T; } catch { return fallback; } };
@@ -31,6 +36,18 @@ export function record(id: string): StudioRecord {
   // An edit made outside the studio (by Claude Code directly): read what is there.
   const born = Math.min(...["words.raw.json", "meta.json", "spans.json"].map((f) => mtime(path.join(d, f))).filter(Boolean), Date.now());
   return { title: id.replace(/-/g, " "), createdAt: new Date(born).toISOString(), stage: existsSync(path.join(d, "render.mp4")) ? "edit" : "cut" };
+}
+
+/** Merge keys into the edit's meta.json, the plugin's record of its language (lang.py set_meta). */
+export function setMeta(id: string, kv: Record<string, unknown>): void {
+  const f = path.join(editDir(id), "meta.json");
+  mkdirSync(editDir(id), { recursive: true });
+  writeFileSync(f, JSON.stringify({ ...readJson<Record<string, unknown>>(f, {}), ...kv }, null, 1));
+}
+
+/** The edit's language: the one the cut heard (meta.json), else the one picked on New video. */
+export function lang(id: string): string | undefined {
+  return readJson<{ lang?: string }>(path.join(editDir(id), "meta.json"), {}).lang ?? record(id).lang;
 }
 
 export function saveRecord(id: string, r: StudioRecord): void {
@@ -112,11 +129,10 @@ export function media(id: string): Record<string, string | undefined> {
 export function summary(id: string) {
   const d = editDir(id), r = record(id);
   const report = readJson<{ duration?: number; final_s?: number }>(path.join(d, "report.json"), {});
-  const meta = readJson<{ lang?: string }>(path.join(d, "meta.json"), {});
   const updated = Math.max(...["studio.json", "progress.jsonl", "cut.mp4", "render.mp4", "plan.json", "spans.json", "words.raw.json"].map((f) => mtime(path.join(d, f))));
   return {
     id, title: r.title, createdAt: r.createdAt, updatedAt: new Date(updated || Date.parse(r.createdAt)).toISOString(),
-    stage: r.stage, approved: r.approved ?? {}, status: status(id), lang: meta.lang,
+    stage: r.stage, approved: r.approved ?? {}, status: status(id), lang: lang(id),
     seconds: { source: report.duration, cut: report.final_s }, media: media(id), progress: lastProgress(id), session: r.session,
   };
 }
@@ -158,7 +174,7 @@ export function transcript(id: string): { words: Word[]; cuts: { start: number; 
     const c = kept ? undefined : cuts.find((x) => x.start <= (w.start + w.end) / 2 && (w.start + w.end) / 2 <= x.end);
     words.push({ i: words.length, text: w.text, start: w.start, end: w.end, kept, ...(c ? { kind: c.kind } : {}) });
   });
-  return { words, cuts, kept: decisions.map((x) => ({ start: x.start, end: x.end })), lang: readJson<{ lang?: string }>(path.join(d, "meta.json"), {}).lang };
+  return { words, cuts, kept: decisions.map((x) => ({ start: x.start, end: x.end })), lang: lang(id) };
 }
 
 /** A poster frame for the video's card: one frame of the cut (else the source), made once. */

@@ -881,6 +881,8 @@ def main():
         progress.step("Writing down every word", key=Path(a.out).parent)
     engine = pick_engine(a.engine)
     code = a.lang.lower()
+    if code == "auto" and a.out:      # the language the user picked in the studio, before the take was heard
+        code = L.asked(Path(a.out).parent) or "auto"
     script_terms = L.keyterms(Path(a.script).read_text(encoding="utf-8"), None if code == "auto" else code) \
         if a.script else []
     terms = clean_keyterms(a.keyterm + script_terms)

@@ -177,6 +177,25 @@ def test_a_number_heard_as_digits_stays_digits():
     assert [x["text"] for x in words] == ["grown", "400%", "since"] and not changed, words
 
 
+def test_hinglish_captions_are_in_roman_letters():
+    """A Hinglish edit: the heard Devanagari becomes Roman-letter Hinglish word by word (two cut words merged into one
+    heard word stay two: "लाटाप की", not one "laatapa ki"), the danda a full stop, a sentence starts capitalised,
+    English words stay as heard, and a fix written in Roman letters lands."""
+    w = lambda t, a, b: {"text": t, "start": a, "end": b, "type": "word"}
+    R.use_lang("hinglish")
+    try:
+        heard = [w("दोस्तों,", 0.0, 0.4), w("आज", 0.45, 0.6), w("AI", 0.65, 0.8), w("assistant", 0.8, 1.2),
+                 w("बनाएं।", 1.25, 1.6), w("लागता", 1.7, 2.1), w("आपकी", 2.1, 2.4), w("नहीं", 2.45, 2.7)]
+        cut = [w("दोस्तों,", 0.0, 0.4), w("आज", 0.45, 0.6), w("AI", 0.65, 0.8), w("assistant", 0.8, 1.2),
+               w("बनाएं।", 1.25, 1.6), w("लाटाप", 1.72, 2.1), w("की", 2.2, 2.4), w("नहीं", 2.45, 2.7)]
+        words, _ = R.caption_words(heard, cut, roman=True)
+        assert " ".join(x["text"] for x in words) == "Doston, aaj AI assistant banayein. Laatap ki nahi", words
+        words, _ = R.caption_words(heard, cut, fixes={"Laatap": "Laptop"}, roman=True)
+        assert "Laptop ki" in " ".join(x["text"] for x in words), words
+    finally:
+        R.use_lang("en")
+
+
 def test_verify_counts_a_misheard_name_as_heard_differently():
     """Same audio, two passes: 'lumo' at 1.2 s heard as 'jeff' is not a missing word; a word gone from the
     audio (nothing heard at its time) still is."""

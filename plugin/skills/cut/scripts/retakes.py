@@ -52,7 +52,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[2] / "lib"))
 import textnorm  # noqa: E402
 from textnorm import load_words, norm, nwords, pair_by_time, words as tn_words  # noqa: E402
-from mm import lang, profile  # noqa: E402
+from mm import hindi, lang, profile  # noqa: E402
 
 PHRASE_GAP_S = 0.5        # a silence this long ends a phrase
 WINDOW_S = 40.0           # a restart this far back is still a retake
@@ -479,11 +479,26 @@ def one_word_each(toks):
     return out
 
 
-def caption_words(heard, cut, names=(), fixes=None):
+def romanize_words(ws):
+    """Hinglish captions: each Devanagari word in Roman letters the way Hinglish writes it (hindi.romanize_word: aaj,
+    karna, nahi), the danda a full stop, a sentence's first word capitalised. Latin words stay as they were heard."""
+    start = True
+    for w in ws:
+        t = w["text"]
+        if hindi.has_deva(t):
+            r = hindi.romanize(t).replace("\u0964", ".").replace("\u0965", ".")   # word by word: "लाटाप की" is two
+            if start:
+                r = re.sub(r"[a-z]", lambda m: m.group(0).upper(), r, count=1)
+            w["text"] = r
+        start = w["text"].rstrip().endswith((".", "?", "!", "\u0964"))
+    return ws
+
+
+def caption_words(heard, cut, names=(), fixes=None, roman=False):
     """heard: cut.transcript.json words; cut: words.json (the approved cut text, timed on the cut). The heard
-    words and times, each word heard differently at the same time spelled as the cut has it, then the fixes
-    and the profile's name spellings. Returns (words, [(was, now)])."""
-    strip = lambda t: re.sub(r"^\W+|\W+$", "", t)
+    words and times, each word heard differently at the same time spelled as the cut has it, in Roman letters for
+    Hinglish (roman), then the fixes and the profile's name spellings. Returns (words, [(was, now)])."""
+    strip = lambda t: re.sub(rf"^[^{lang.WCH}]+|[^{lang.WCH}]+$", "", t)  # noqa: E731 (\\W would take a vowel sign)
     hw = [dict(w) for w in heard if w.get("type", "word") == "word" and norm(w["text"])]
     cw = [w for w in cut if w.get("type", "word") == "word" and norm(w["text"])]
     key = lambda ws: [(norm(w["text"]), w["start"], w["end"]) for w in ws]
@@ -503,6 +518,8 @@ def caption_words(heard, cut, names=(), fixes=None):
         core = strip(hw[j]["text"])
         new = " ".join(ws)
         hw[j]["text"] = hw[j]["text"].replace(core, new, 1) if core and ws else new
+    if roman:
+        romanize_words(hw)
     spell = {n.lower(): n for n in names}
     for w in hw:
         for old, new in (fixes or {}).items():
@@ -520,8 +537,10 @@ def captions(d):
     cut = load_words(d / "words.json") if (d / "words.json").exists() else []
     fj = d / "fixes.json"
     names = [n["name"] for n in profile.load().get("names") or [] if isinstance(n, dict) and n.get("name")]
-    words, changed = caption_words(heard, cut, names, json.loads(fj.read_text(encoding="utf-8")) if fj.exists() else {})
-    (d / "captions.json").write_text(json.dumps(words, indent=1), encoding="utf-8")
+    roman = lang.pack(lang.of(d)).code == "hinglish" and lang.pack(lang.of(d)).script == "latn"
+    words, changed = caption_words(heard, cut, names, json.loads(fj.read_text(encoding="utf-8")) if fj.exists() else {},
+                                   roman)
+    (d / "captions.json").write_text(json.dumps(words, indent=1, ensure_ascii=False), encoding="utf-8")
     (d / "captions.txt").write_text(text_view(words, "captions", "A misheard word: retakes.py fix <edit_dir> old=new."), encoding="utf-8")
     return words, changed
 

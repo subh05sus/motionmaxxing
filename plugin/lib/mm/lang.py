@@ -216,6 +216,13 @@ def set_meta(edit_dir, **kw):
     return m
 
 
+def asked(edit_dir):
+    """The language the user picked for the take before it was heard (the studio's New video page writes meta.json's
+    "lang_asked"), or None: transcribe.py uses it in place of detecting one."""
+    got = get_meta(edit_dir).get("lang_asked") if edit_dir is not None else None
+    return pack(got).code if got and got != "auto" else None
+
+
 def of(edit_dir=None):
     """The language to read an edit with: MM_LANG, else meta.json's "lang", else DEFAULT."""
     env = os.environ.get("MM_LANG", "").strip()
@@ -343,6 +350,11 @@ def demo():
     assert re.sub(rf"[^{WCH}' ]+", " ", "नमस्ते, दोस्तों। आज?").split() == ["नमस्ते", "दोस्तों", "आज"]
     with tempfile.TemporaryDirectory() as t:
         assert of(t) == "en"
+        assert asked(t) is None
+        set_meta(t, lang_asked="auto")
+        assert asked(t) is None
+        set_meta(t, lang_asked="hindi")
+        assert asked(t) == "hi" and of(t) == "en"     # picked, not heard yet: the edit's language is set by transcribe
         set_meta(t, lang="de", engine="whispercpp")
         assert of(t) == "de" and get_meta(t)["engine"] == "whispercpp"
         os.environ["MM_LANG"] = "en"

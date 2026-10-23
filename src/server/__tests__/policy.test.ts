@@ -41,6 +41,11 @@ describe("names and words", () => {
     expect(slug("Über Jarvis – Teil 2")).toBe("ueber-jarvis-teil-2");
     expect(slug("Café crème.mov")).toBe("cafe-creme");
     expect(slug("...")).toBe("video");
+    // a Hindi file name: Latin letters, never Devanagari with its vowel signs dropped ("मर-वडय")
+    expect(slug("मेरा वीडियो.mp4")).toBe("mera-vidiyo");
+    expect(slug("AI टूल्स - भाग 2")).toBe("ai-tuls-bhag-2");
+    expect(slug("ज़रूरी बात")).toBe("zaruri-bat");
+    expect(slug("कमल")).toBe("kamal");
   });
   it("calls a word kept the way the timeline builder does", () => {
     const spans = [{ start: 1, end: 2 }];

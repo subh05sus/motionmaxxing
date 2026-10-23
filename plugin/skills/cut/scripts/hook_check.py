@@ -38,9 +38,12 @@ building become becomes stop start starting learn learning actually really still
 should need want one way ways new like let lets""".split())
 EN_GENERIC = {"ai", "video", "tool", "thing", "guide", "tip"}
 DE_ENDINGS = ("ern", "en", "er", "es", "em", "e", "n", "s")   # one ending off, so "Apps"/"App", "Minuten"/"Minute" meet
+HINDI = ("hi", "hinglish")
 
 
 def norm(w):
+    if LANG in HINDI:   # by sound, the same in either script: a title in Roman letters meets Devanagari speech
+        return singular(Lg.key(w, LANG))
     w = re.sub(rf"[^{Lg.WCH}']|_", "", w.lower().replace("’", "'"))
     if LANG == "de":
         w = w.replace("'", "")
@@ -48,7 +51,10 @@ def norm(w):
             if len(w) >= 4 and len(w) - len(suf) >= 3 and w.endswith(suf):
                 return w[:-len(suf)]
         return w
-    w = re.sub(r"'s$", "", w).replace("'", "")
+    return singular(re.sub(r"'s$", "", w).replace("'", ""))
+
+
+def singular(w):
     if len(w) > 4 and w.endswith("ies"):
         return w[:-3] + "y"
     if len(w) > 4 and w.endswith("es") and w[-3] in "sxh":
@@ -66,6 +72,9 @@ def use_lang(code):
     if LANG == "de":
         STOP = {norm(w) for w in P.hook_stop | P.hook_verbs}
         GENERIC = {norm(w) for w in P.hook_generic}
+    elif LANG in HINDI:   # a Hinglish title mixes in English: its stop words and title verbs too
+        STOP = {norm(w) for w in P.hook_stop | P.hook_verbs | EN_STOP}
+        GENERIC = {norm(w) for w in P.hook_generic | EN_GENERIC}
     else:
         STOP = {norm(w) for w in EN_STOP}   # compared after norm(): "this" -> "thi"
         GENERIC = EN_GENERIC
@@ -142,6 +151,13 @@ def demo():
     T = key_terms("So baust du eine App mit Claude Code in 15 Minuten")
     assert ("claud", "cod") in T or ("claude", "code") in T or any("app" in t for t in T), T
     assert check(W("heute zeige ich euch wie ihr apps baut"), "So baust du eine App")[0] == 3.0
+    use_lang("hinglish")   # a Roman-letter title, Devanagari speech with English words: met by sound
+    T = key_terms("AI se paise kaise kamaye")
+    assert ("pais",) in T or ("paise",) in T, T
+    assert check(W("आज मैं बताऊंगा कि AI से पैसे कैसे कमाएं"), "AI se paise kaise kamaye")[0] == 3.0
+    assert check(W("दोस्तों आज हम बात करेंगे Claude Code की"), "Claude Code se app banao")[0] == 2.5
+    use_lang("hi")
+    assert check(W("नमस्ते दोस्तों आज हम सीखेंगे पाइथन"), "पाइथन सीखें")[0] == 2.5   # the 6th word
     use_lang("en")
     # loads the Transcription shape (a list, spacing skipped) and an edit folder
     import tempfile

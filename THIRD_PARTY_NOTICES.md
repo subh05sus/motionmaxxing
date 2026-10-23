@@ -13,6 +13,7 @@ Portions of this software are licensed under the MIT License with their own copy
 | `plugin/skills/motion-design/` (motion design principles) | MIT, Copyright (c) 2025 LottieFiles | Its `LICENSE` sits in the folder. |
 | `plugin/skills/watch/` (video understanding) | MIT, Copyright (c) 2026 subh05sus | From github.com/subh05sus/video-understanding-skill. |
 | `plugin/skills/motion/kit/ui/82-clawd-pack.js` (the mascot's 70 poses) | Public, free to use | Re-cast from a public pixel pose pack onto the minimal Clawd. Clawd is Anthropic's character; motionmaxxing is not affiliated with Anthropic. |
+| `plugin/skills/motion/kit/fonts/` (Inter Tight, Instrument Serif, JetBrains Mono, Noto Sans Devanagari) | SIL Open Font License 1.1 | Each font's licence sits in its folder. Noto Sans Devanagari draws Hindi in the motion clips. |
 
 ## Tools the editor runs (not shipped here)
 
