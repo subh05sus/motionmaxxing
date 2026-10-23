@@ -342,16 +342,33 @@ def keyterms(text, code=None):
     digit, not a common word. German: with a digit, an inner capital (ChatGPT), all caps (KI), or spelled the way
     German rarely spells (Claude, Cursor), not a common word."""
     P = pack(code)
+    text = hindi.clean(text)
+    toks = [(m.group(0), not text[:m.start()].rstrip() or text[:m.start()].rstrip().endswith(SENT_END))
+            for m in re.finditer(rf"[{WCH}][{WCH}.+#'-]*[{WCH}+#]|[{WCH}]", text)]   # (word, starts a sentence)
+    # a Hinglish script in Roman letters: its Hindi words are Latin too, so a name is what English capitalises
+    roman = P.numbers == "hi" and latin_share([w for w, _ in toks]) > 0.5
+    mid_caps = {w.lower() for w, start in toks if not start and w[:1].isupper()}
+    # a sentence's first word is a name when one follows it ("Claude Code se app banao"), unless it is a Hindi word
+    # in Roman letters ("Phir Base44 par"): hindi.py's own spellings, the number words, the pack's cue words
+    hindi_roman = {v.lower() for v in hindi.COMMON.values()} | set(hindi.ROMAN) | {
+        x for v in getattr(P, "motion", {}).values() for x in v if re.fullmatch(r"[a-z]+", x)}
+    mid_caps |= {w.lower() for (w, start), (nx, nst) in zip(toks, toks[1:])
+                 if start and not nst and nx[:1].isupper() and w.lower() not in hindi_roman}
     out, seen = [], set()
-    for w in re.findall(rf"[{WCH}][{WCH}.+#'-]*[{WCH}+#]|[{WCH}]", hindi.clean(text)):
+    for w, start in toks:
         w = re.sub(r"'s$", "", w)
         low = w.lower()
         if len(w) < 2 or low in P.common or low in seen:
             continue
         digit = any(c.isdigit() for c in w)
-        if P.numbers == "hi":
-            # Hindi: a name, product or term is in Latin letters (English inside Hindi speech) or has a digit
-            keep = digit or (bool(re.search(r"[A-Za-z]", w)) and not hindi.has_deva(w) and (w[0].isupper() or len(w) > 3))
+        latin = bool(re.search(r"[A-Za-z]", w)) and not hindi.has_deva(w)
+        if roman:
+            # Doston, dikhaunga, Sirf are Hindi; AI, ChatGPT and a capital mid-sentence (Claude, Base44) are names
+            inner = any(c.isupper() for c in w[1:]) and not w.isupper()
+            keep = digit or (latin and (w.isupper() or inner or (w[0].isupper() and (not start or low in mid_caps))))
+        elif P.numbers == "hi":
+            # Hindi in Devanagari: a name, product or term is in Latin letters (English inside Hindi speech) or has a digit
+            keep = digit or (latin and (w[0].isupper() or len(w) > 3))
         elif P.code == "de":
             inner = any(c.isupper() for c in w[1:]) and not w.isupper()
             caps = w.isupper() and len(w) >= 2 and w.isalpha()
@@ -392,6 +409,10 @@ def demo():
         ["Claude", "Code", "ChatGPT", "15"]
     assert abs(latin_share(["आज", "मैं", "AI", "assistant", "बनाऊँगा"]) - 0.4) < 1e-9 and latin_share([]) == 0.0
     assert re.sub(rf"[^{WCH}' ]+", " ", "नमस्ते, दोस्तों। आज?").split() == ["नमस्ते", "दोस्तों", "आज"]
+    # a Hinglish script in Roman letters: the names, never its Hindi words (they would push Whisper to Latin letters)
+    got = keyterms("Doston, aaj main aapko dikhaunga ki apna khud ka AI assistant kaise banayein. Sirf 5 easy steps "
+                   "mein. Claude Code se app banao, ChatGPT ki zaroorat nahi. Phir Base44 par host karo.", "hinglish")
+    assert got == ["AI", "Claude", "Code", "ChatGPT", "Base44"], got
     with tempfile.TemporaryDirectory() as t:
         assert of(t) == "en"
         assert asked(t) is None
