@@ -74,7 +74,8 @@ case "${1:-open}" in
     # this studio only: its pid and whatever serves its port, never another studio on this Mac (a pkill of every
     # main.ts took one on another port down)
     stopped=""
-    for p in $( { cat "$PIDF" 2>/dev/null; lsof -nP -t -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null; } | sort -u || true); do
+    # the echo: a pid file with no newline at its end ran into lsof's first pid ("7935179351"), and nothing stopped
+    for p in $( { cat "$PIDF" 2>/dev/null; echo; lsof -nP -t -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null; } | sort -u || true); do
       kill "$p" 2>/dev/null && stopped=1
     done
     rm -f "$PIDF"
