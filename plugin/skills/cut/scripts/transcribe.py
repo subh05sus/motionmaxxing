@@ -152,7 +152,7 @@ def cpp_words(payload):
                 words[-1]["end"] = round(max(words[-1]["end"], b), 3)
             fresh = False
     out = []
-    for w in loops(words):
+    for w in loops(phrase_loops(words)):
         if BRACKETED.match(w["text"]):
             w["type"] = "audio_event"
         if w["end"] < w["start"]:
@@ -161,6 +161,33 @@ def cpp_words(payload):
             out[-1]["text"] += w["text"]
             continue
         out.append(w)
+    return out
+
+
+LOOP_WORD_S = 0.12   # a copy said faster than this a word was not said: looped copies ran 0.02-0.1 s a word
+
+
+def phrase_loops(words, longest=24):
+    """words without Whisper repeating a sentence on one moment: "And I turned it into a cloud skill." four times at
+    208.68 s on a real Hinglish take, every word 0.04 s, and a dozen more copies over 17 s, some words squeezed and
+    some stretched. A copy straight after the same words that starts within a second of it and is said faster than
+    LOOP_WORD_S a word goes; a sentence said again takes its own time, so a retake stays. A first copy that is
+    squeezed too is heard again by heal (patch() takes the second listen's words when it hears more)."""
+    key = lambda w: re.sub(rf"[^{L.WCH}]|_", "", w["text"].lower())   # noqa: E731
+    out, i = list(words), 0
+    while i < len(out):
+        cut = False
+        for n in range(2, longest + 1):
+            a, b = out[i:i + n], out[i + n:i + 2 * n]
+            if len(b) < n:
+                break
+            if [key(w) for w in a] == [key(w) for w in b] and b[0]["start"] - a[-1]["end"] < 1.0 \
+                    and b[-1]["end"] - b[0]["start"] < n * LOOP_WORD_S:
+                del out[i + n:i + 2 * n]   # and look here again: there may be another copy
+                cut = True
+                break
+        if not cut:
+            i += 1
     return out
 
 
@@ -551,8 +578,8 @@ def cache_dir():
     return HOME / "cache" / "transcripts"
 
 
-WORDS_VERSION = 4   # bumped when the same settings give other words: 2 Hindi's prompt and DTW times, 3 soft edges,
-#                     4 Whisper's loops as sounds
+WORDS_VERSION = 5   # bumped when the same settings give other words: 2 Hindi's prompt and DTW times, 3 soft edges,
+#                     4 Whisper's loops as sounds, 5 a sentence looped on one moment dropped
 
 
 def cache_key(media, engine, code, terms):
@@ -964,6 +991,12 @@ def demo():
     got = loops([W("आपके"), W("अवा" + "वा" * 40), W("Oh,")] + [W("oh,") for _ in range(7)] + [W("no"), W("no"), W("no")])
     assert [w["type"] for w in got] == ["word", "audio_event"] + ["audio_event"] * 8 + ["word"] * 3, got
     assert loops([W("hahahahahahahaha")])[0]["type"] == "audio_event" and loops([W("Mississippi")])[0]["type"] == "word"
+    # a sentence looped on one moment (a real Hinglish take: 4 copies at 208.68 s, 0.04 s a word) keeps one copy; the
+    # same sentence said again 2 s later, at speaking pace, is a retake and stays
+    T = lambda t, a, b: {"text": t, "start": a, "end": b, "type": "word"}   # noqa: E731
+    say = lambda t0, d: [T(x, t0 + k * d, t0 + k * d + d) for k, x in enumerate("And I turned it into a skill.".split())]   # noqa: E731
+    got = phrase_loops(say(208.60, 0.04) + say(208.68, 0.04) + say(208.68, 0.04) + say(208.68, 0.04) + say(210.5, 0.3))
+    assert len(got) == 14 and got[7]["start"] == 210.5, [(w["text"], w["start"]) for w in got]
     global HOME
     old = HOME
     with tempfile.TemporaryDirectory() as t:
