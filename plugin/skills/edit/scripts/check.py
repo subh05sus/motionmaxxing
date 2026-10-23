@@ -33,7 +33,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
-from plan import GAP_S, MIN_SHOW_S, QUIET_HOLD_S, card_gaps, INK_MIN_W, OVERLAY_EDGE, READ_XH, SAFE, capture_xh, explain_ink, clean, cut_lines, cut_points, head_during, overlay_led, small_lines, sticker_crop, words_only, CAP_GLYPH, CHIN_SHARE, BOX_SHARE_MAX, placement, CAP_FLOOR, FACE_GROWN, MOUTH_FACE  # noqa: E402
+from plan import WCH, GAP_S, MIN_SHOW_S, QUIET_HOLD_S, card_gaps, INK_MIN_W, OVERLAY_EDGE, READ_XH, SAFE, capture_xh, explain_ink, clean, cut_lines, cut_points, head_during, overlay_led, small_lines, sticker_crop, words_only, CAP_GLYPH, CHIN_SHARE, BOX_SHARE_MAX, placement, CAP_FLOOR, FACE_GROWN, MOUTH_FACE  # noqa: E402
 
 CENTRE_PLAN = 1.5      # % of the width a vertical card's box centre may sit off 50
 CENTRE_INK = 2.0       # % of the width a card's drawn content may sit off centre
@@ -292,9 +292,9 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
     for c in cards:
         name = f"'{c['trigger_word']}' {c.get('src') or c['anim']['type']}"
         x, y, w, h = c["box"]
-        word = re.sub(r"[^\w'-]+", "", c["trigger_word"]).lower()
+        word = re.sub(rf"[^{WCH}'-]+", "", c["trigger_word"]).lower()
         if c.get("layout") == "scene" and beats is not None and c.get("scene_by") != "creator" and not any(
-                b.get("layout") in ("scene", "split", "background") and re.sub(r"[^\w'-]+", "", b.get("word") or "").lower() == word for b in beats):
+                b.get("layout") in ("scene", "split", "background") and re.sub(rf"[^{WCH}'-]+", "", b.get("word") or "").lower() == word for b in beats):
             out.append(finding("FAIL", c["start"], f"{name} is a full-frame scene nobody asked for: the speaker leaves the frame",
                                "make it an overlay: plan again with no \"layout\": \"scene\" on that beat (a scene only when "
                                "the user asks for one)"))
@@ -631,10 +631,13 @@ def slivers(spans, fps):
     return out
 
 
-def caption_looks(heard, shown, known):
+def caption_looks(heard, shown, known, code=None):
     """Words in captions.json that differ from what cut.transcript.json heard, minus names
-    the edit uses on purpose (visuals.json) and the cut's own spelling (words.json, fixes.json)."""
-    norm = lambda w: re.sub(r"[^\w']+", "", w["text"].replace("’", "'")).lower()
+    the edit uses on purpose (visuals.json) and the cut's own spelling (words.json, fixes.json). Hindi and Hinglish
+    compare by sound: Hinglish captions are in Roman letters where Whisper heard Devanagari."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+    from mm import lang as L
+    norm = lambda w: L.key(re.sub(rf"[^{WCH}']+", "", w["text"].replace("’", "'")), code)  # noqa: E731
     tok = lambda ws: [w for w in ws if w.get("type", "word") == "word" and norm(w)]
     a, b = tok(heard), tok(shown)
     out = []
@@ -1343,9 +1346,9 @@ def main():
             found += f
         if heard and shown:
             # names the edit uses on purpose, and the approved cut text captions take a misheard name from
-            known = {s.lower() for s in re.findall(r"[\w']+", json.dumps([rd("visuals.json") or [], rd("words.json") or [],
-                                                                        rd("fixes.json") or {}]))}
-            found += caption_looks(heard, shown, known)
+            known = {s.lower() for s in re.findall(rf"[{WCH}']+", json.dumps([rd("visuals.json") or [], rd("words.json") or [],
+                                                                         rd("fixes.json") or {}], ensure_ascii=False))}
+            found += caption_looks(heard, shown, known, (rd("meta.json") or {}).get("lang"))
     n = report(found, a.mode)
     out = edit / f"check{tag}.json"
     doc = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}

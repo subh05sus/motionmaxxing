@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Verbatim word-level transcription of a take, on this computer. Writes the words and the edit's language.
 
-    python transcribe.py <media> <out.json> [--engine auto|whispercpp|whisper] [--lang auto|de|en|...]
+    python transcribe.py <media> <out.json> [--engine auto|whispercpp|whisper] [--lang auto|de|en|hi|hinglish|...]
                          [--script script.md] [--keyterm TERM ...]
     python transcribe.py <media> --pre        the studio, the moment a clip is added (before Make): the same
                                               transcription into the cache
@@ -125,8 +125,9 @@ def cpp_model():
 def cpp_words(payload):
     """whisper.cpp's full JSON -> words. A token with a leading space starts a word; one without continues it
     ("ze" "ige" -> "zeige", "euch" "," -> "euch,"). A new segment always starts a new word. Special tokens
-    ([_BEG_], [_TT_n]) are skipped; a bracketed sound ("[Musik]") is an audio_event."""
-    words = []
+    ([_BEG_], [_TT_n]) are skipped; a bracketed sound ("[Musik]") is an audio_event. With DTW times (t_dtw, Hindi)
+    those are the times; snap() then holds them to the audio."""
+    words, prev = [], None
     for seg in payload.get("transcription", []):
         fresh = True
         for tok in seg.get("tokens", []):
@@ -134,6 +135,11 @@ def cpp_words(payload):
             if t.startswith("[_") or not t.strip():
                 continue
             a, b = tok["offsets"]["from"] / 1000, tok["offsets"]["to"] / 1000
+            if tok.get("t_dtw", -1) >= 0:
+                # DTW: the token ends here; it started its own length earlier, never before the token before it ended
+                b = tok["t_dtw"] / 100
+                a = b - min(tok_s(t), max(0.02, b - prev)) if prev is not None else b - tok_s(t)
+                prev = b
             if fresh or t.startswith(" ") or not words:
                 words.append({"text": t.strip(), "start": round(a, 3), "end": round(b, 3), "type": "word"})
             else:
@@ -162,10 +168,125 @@ def wav_seconds(wav):
         return w.getnframes() / float(w.getframerate())
 
 
+def whisper_code(code):
+    """The language Whisper is run with: Hinglish is heard as Hindi ("hi" writes the Hindi in Devanagari and keeps
+    English words in Latin letters; "en" would translate the Hindi into English)."""
+    return "auto" if not code or code == "auto" else L.pack(code).whisper
+
+
+def uses_dtw(code):
+    """Word times from Whisper's DTW alignment: Hindi and Hinglish. Their default times ran up to a second early on a
+    test take (a restart's first word put inside the pause before it); DTW lands within 0.1 s once each word's start
+    is set back by its first token's length (tok_s). English and German keep the default times (within 0.05 s)."""
+    return bool(code) and code != "auto" and L.pack(code).dtw
+
+
+def dtw_preset(model_name):
+    """whisper.cpp's DTW preset for a model: large-v3-turbo -> large.v3.turbo."""
+    return model_name.replace("-", ".")
+
+
+def tok_s(text):
+    """How long a token is said, for setting a word's start back from its DTW time (the end of its first token):
+    about 0.065 s a letter or Devanagari sign, 0.04-0.35 s."""
+    n = len(re.sub(r"[^A-Za-z0-9\u0900-\u097f]", "", text)) or 1
+    return max(0.04, min(0.35, 0.065 * n))
+
+
+QUIET_RUN_S = 0.25   # DTW gives a pause to the word before it: a silent run this long inside a word is where it ends
+SOFT_REACH_S = 0.25  # a word's soft edge (the "s" of "Step", the "f" of "sirf") is followed this far past its DTW time
+SOFT_DIP_S = 0.06    # ... across a gap this short (the closure in "st")
+
+
+def levels(wav):
+    """(20 ms levels, the soft line): a sound above the soft line is a sound, even a fricative under the speech
+    threshold ("s" at -50 dB in a take whose threshold is -39 dB and floor -89 dB); below it is silence."""
+    import build_timeline as B
+    lvl = B.window_rms_db(wav)
+    noise, diag = B.derive_noise_db(lvl)
+    if noise is None:
+        return lvl, None
+    floor = diag.get("floor", noise - 20)
+    return lvl, (floor + noise) / 2
+
+
+def quiet_runs(lvl, soft):
+    """[(a, b)] seconds of silence (under the soft line) for QUIET_RUN_S or longer."""
+    import build_timeline as B
+    runs, a = [], None
+    for i, v in enumerate(list(lvl) + [0.0]):
+        if i < len(lvl) and v <= soft:
+            a = i if a is None else a
+        elif a is not None:
+            if (i - a) * B.RMS_WIN_S >= QUIET_RUN_S:
+                runs.append((a * B.RMS_WIN_S, i * B.RMS_WIN_S))
+            a = None
+    return runs
+
+
+def soft_edge(t, lvl, soft, step, limit):
+    """Where the sound around t really starts (step -1) or ends (step +1): past soft sound (a fricative, an
+    aspiration) and gaps of up to SOFT_DIP_S, at most SOFT_REACH_S, never past limit (the next word's edge)."""
+    import build_timeline as B
+    w = B.RMS_WIN_S
+    k = int(t / w) - 1 if step < 0 else int(t / w)
+    best, dip = t, 0
+    while 0 <= k < len(lvl) and abs(k * w - t) <= SOFT_REACH_S and (k * w > limit if step < 0 else k * w < limit):
+        if lvl[k] > soft:
+            best, dip = (k * w if step < 0 else (k + 1) * w), 0
+        else:
+            dip += 1
+            if dip * w > SOFT_DIP_S:
+                break
+        k += step
+    return best
+
+
+def snap(words, audio):
+    """DTW-timed words held to the audio (audio: levels(wav)): a word ends where a silence inside it begins, a start
+    inside a silence moves to where the speech resumes, and each edge takes in the soft sound next to it (DTW starts
+    a word at its first loud sound: "Step" lost its "s" to a pause trim). Spacing tokens come back with_spacing."""
+    lvl, soft = audio
+    if soft is None:
+        return words
+    runs = quiet_runs(lvl, soft)
+    ws = [dict(w) for w in words]
+    idx = [i for i, w in enumerate(ws) if w.get("type") == "word"]
+    for n, i in enumerate(idx):
+        w = ws[i]
+        st, en = w["start"], w["end"]
+        for a, b in runs:
+            if a <= st < b - 0.02:
+                st = b
+            if st + 0.05 <= a < en:
+                en = a + 0.02
+                break
+        prev_end = ws[idx[n - 1]]["end"] if n else 0.0
+        nxt = ws[idx[n + 1]]["start"] if n + 1 < len(idx) else en + SOFT_REACH_S
+        st = min(st, soft_edge(st, lvl, soft, -1, prev_end))
+        en = max(en, soft_edge(en, lvl, soft, +1, max(en, nxt)))
+        w.update(start=round(st, 3), end=round(max(en, st + 0.04), 3))
+    return ws
+
+
+def decide(asked, heard, words):
+    """The edit's language: the one asked for, else the one Whisper heard. Heard Hindi is Hinglish when English
+    words in Latin letters make a share of it (lang.LATIN_SHARE_HINGLISH): its captions are then in Roman letters."""
+    if asked and asked != "auto":
+        return L.pack(asked).code
+    p = L.pack(heard)
+    if p.numbers == "hi":
+        share = L.latin_share([w for w in words if w.get("type", "word") == "word"])
+        return "hinglish" if share >= L.LATIN_SHARE_HINGLISH else "hi"
+    return p.code if heard else L.DEFAULT
+
+
 def cpp_files(wavs, code, prompt):
     """One whisper-cli call over several wav files (the model loads once) -> [payload per file]."""
     model, _ = cpp_model()
-    cmd = [whisper_cli(), "-m", str(model), "-l", code or "auto", "-ojf", "-np", "--prompt", prompt]
+    cmd = [whisper_cli(), "-m", str(model), "-l", whisper_code(code), "-ojf", "-np", "--prompt", prompt]
+    if uses_dtw(code):
+        cmd += ["-nfa", "-dtw", dtw_preset(cpp_model()[1])]   # DTW needs flash attention off
     for w in wavs:
         cmd += ["-f", str(w)]
     r = subprocess.run(cmd, capture_output=True, text=True)
@@ -293,12 +414,17 @@ def cpp_detect(wav):
 
 def run_cpp(wav, code, terms):
     prompt = prompt_for(code, terms)
-    print(f"whisper.cpp {cpp_model()[1]} (GPU), language {code}", flush=True)
+    print(f"whisper.cpp {cpp_model()[1]} (GPU), language {code}" + (", DTW word times" if uses_dtw(code) else ""),
+          flush=True)
     words, heard = cpp_run(wav, code, prompt)
+    audio = levels(wav) if uses_dtw(code) else None
+    if audio is not None:
+        words = snap(words, audio)
 
     def again(start, end):   # a stretch one label holds, heard on its own
-        return [w for w in cpp_stretch(wav, code, prompt, start, end)
-                if w["start"] >= start - 0.05 and w["end"] <= end + 0.25]
+        got = cpp_stretch(wav, code, prompt, start, end)
+        got = snap(got, audio) if audio is not None else got
+        return [w for w in got if w["start"] >= start - 0.05 and w["end"] <= end + 0.25]
 
     return recheck(wav, with_spacing(words), again), heard or code
 
@@ -327,7 +453,7 @@ def run_fw(wav, code, terms):
     prompt = prompt_for(code, terms)
     # condition_on_previous_text=False: with it on, Whisper collapses a repeated line into one, and repeated lines
     # are the retakes. vad_filter=True: without it, word times drift after a long silence.
-    segs, info = model.transcribe(str(wav), language=None if code == "auto" else code, word_timestamps=True,
+    segs, info = model.transcribe(str(wav), language=None if code == "auto" else whisper_code(code), word_timestamps=True,
                                   initial_prompt=prompt, beam_size=5, condition_on_previous_text=False,
                                   vad_filter=True, vad_parameters={"min_silence_duration_ms": 500})
 
@@ -392,12 +518,16 @@ def cache_dir():
     return HOME / "cache" / "transcripts"
 
 
+WORDS_VERSION = 3   # bumped when the same settings give other words: 2 Hindi's prompt and DTW times, 3 soft edges
+
+
 def cache_key(media, engine, code, terms):
     """The take (path, size, modified time) and every setting that changes the words."""
     st = Path(media).stat()
     model = os.environ.get("MM_WHISPER_MODEL", DEFAULT_CPP_MODEL) if engine == "whispercpp" else \
         os.environ.get("MM_FW_MODEL", DEFAULT_FW_MODEL)
-    raw = json.dumps([str(Path(media).resolve()), st.st_size, st.st_mtime_ns, engine, model, code, list(terms)])
+    raw = json.dumps([str(Path(media).resolve()), st.st_size, st.st_mtime_ns, engine, model, code, list(terms),
+                      WORDS_VERSION])
     return hashlib.sha1(raw.encode()).hexdigest()[:20]
 
 
@@ -452,19 +582,21 @@ def transcribe(media, engine, code, terms):
         if code == "auto":
             code = detect(wav, engine)
             print(f"language   {code} (detected)", flush=True)
+            if L.pack(code).numbers == "hi":
+                code = "hinglish"   # heard as Hindi with the prompt that keeps English words in Latin letters
         if terms:
             print(f"keyterms   {len(terms)}: " + ", ".join(terms[:8]), flush=True)
         run = run_cpp if engine == "whispercpp" else run_fw
         return run(wav, code, terms)
 
 
-def write(out, words, lang_code, engine):
+def write(out, words, lang_code, engine, heard=None):
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(words, indent=1, ensure_ascii=False), encoding="utf-8")
     model = os.environ.get("MM_WHISPER_MODEL", DEFAULT_CPP_MODEL) if engine == "whispercpp" else \
         os.environ.get("MM_FW_MODEL", DEFAULT_FW_MODEL)
-    L.set_meta(out.parent, lang=L.pack(lang_code).code if lang_code else None, heard=lang_code, engine=engine,
+    L.set_meta(out.parent, lang=L.pack(lang_code).code if lang_code else None, heard=heard or lang_code, engine=engine,
                model=model)
     n = sum(1 for w in words if w["type"] == "word")
     print(f"{n} words -> {out} (language {lang_code})")
@@ -513,6 +645,7 @@ def refine(edit, start, end, source=None):
         extract_audio(src, wav)
         # heard in 10 s pieces, 1.5 s past both edges: only words whose middle is inside [start, end] are taken
         new = cpp_pieces(wav, code, prompt_for(code, []), start, end) if pick_engine("auto") == "whispercpp" else []
+        new = snap(new, levels(wav)) if uses_dtw(code) and new else new
     words, done = patch(words, start, end, new)
     if done:
         raw.write_text(json.dumps(words, indent=1, ensure_ascii=False), encoding="utf-8")
@@ -772,7 +905,8 @@ def main():
         got = cached(ck)
         if got is not None:
             print(f"engine {engine}: reused the transcript made when the clip was added", flush=True)
-            return write(a.out, got["words"], got.get("lang") or code, engine)
+            heard = got.get("lang") or code
+            return write(a.out, got["words"], decide(code, heard, got["words"]), engine, heard)
     try:
         words, heard = transcribe(a.media, engine, code, terms)
         keep(ck, heard, words)
@@ -780,7 +914,7 @@ def main():
         if a.pre:
             lock.unlink(missing_ok=True)
     if not a.pre:
-        write(a.out, words, heard, engine)
+        write(a.out, words, decide(code, heard, words), engine, heard)
 
 
 # --- self-check -------------------------------------------------------------------------------------------------

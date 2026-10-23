@@ -41,7 +41,7 @@ DE_ENDINGS = ("ern", "en", "er", "es", "em", "e", "n", "s")   # one ending off, 
 
 
 def norm(w):
-    w = re.sub(r"[^\w']|_", "", w.lower().replace("’", "'"))
+    w = re.sub(rf"[^{Lg.WCH}']|_", "", w.lower().replace("’", "'"))
     if LANG == "de":
         w = w.replace("'", "")
         for suf in DE_ENDINGS:

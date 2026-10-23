@@ -136,8 +136,12 @@ GAP_S = 10.0
 QUIET_HOLD_S = 5.0
 
 
+# word characters in every script captions are written in (lib/mm/lang.WCH: Python's \\w drops Devanagari's vowel signs)
+WCH = r"\w\u0300-\u036f\u0900-\u0963\u0966-\u097f\ua8e0-\ua8ff\u1cd0-\u1cff"
+
+
 def clean(text):
-    return re.sub(r"[^\w'’-]+", "", text)
+    return re.sub(rf"[^{WCH}'’-]+", "", text)
 
 
 def cased(text, mode):

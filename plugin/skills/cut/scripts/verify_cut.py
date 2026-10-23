@@ -164,8 +164,13 @@ def report(d, expected, actual, removed, same, differ, gone, new, act=None, span
     missing = [(i, t) for i, t in missing if t not in FILLERS]
     # rehear.py heard the take's own audio at every piece's edges: words it heard as the kept line, right where the
     # render has them, are the line with a wrong label in the raw transcript ("Und" labelled 0.7 s early), not a survivor
-    line_runs = [r for r in runs if act and spans and heard_as_line(d, actual[r[0]:r[1]], to_source(act[r[0]][1], spans),
-                                                                   to_source(act[r[1] - 1][2], spans))]
+    # a run is mapped from inside: its start from its first word's end, its end from its last word's start. The render's
+    # transcriber times a word at a join up to 0.1 s across it ("Ab" at 28.15 s, the join at 28.23 s; "home" ending
+    # after its piece did), and that edge maps into the neighbouring piece (a one-frame shift of an earlier join turned
+    # two kept lines into "survivors"); a word of the new piece always ends after the join, one of the old piece
+    # always starts before it
+    line_runs = [r for r in runs if act and spans and heard_as_line(d, actual[r[0]:r[1]], to_source(act[r[0]][2], spans),
+                                                                   to_source(act[r[1] - 1][1], spans))]
     runs = [r for r in runs if r not in line_runs]
     survived = [actual[j] for j1, j2 in runs for j in range(j1, j2) if actual[j] not in FILLERS and fragment(actual[j])]
 

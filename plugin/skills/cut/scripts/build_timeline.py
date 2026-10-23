@@ -218,6 +218,57 @@ def window_rms_db(src):
     return out
 
 
+FRICATIVE_DB = 1.0        # a window this much louder over 4 kHz than in the speech band is a fricative ("s", "sh", "f")
+HF_FLOOR_OVER_DB = 20.0   # ... and this far over the high band's own floor (not hiss): rehear.py's measure, where 119
+                          # real breaths sat at -14 dB (median) and +0.2 dB at most, an "s" at +2 dB
+
+
+def band_rms_db(src, band):
+    """20 ms levels of one frequency band (lo, hi) Hz, like window_rms_db."""
+    n = int(16000 * RMS_WIN_S)
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(src), "-vn", "-ac", "1", "-ar", "16000", "-af",
+                          f"highpass=f={band[0]},lowpass=f={band[1]}", "-f", "s16le", "-"], capture_output=True).stdout
+    a = array.array("h")
+    a.frombytes(raw[: len(raw) // 2 * 2])
+    out = []
+    for i in range(0, len(a) - n, n):
+        m = sum(v * v for v in a[i:i + n]) / n
+        out.append(10 * math.log10(m / 32768.0 ** 2) if m > 0 else -120.0)
+    return out
+
+
+def fricative_windows(src):
+    """[bool] per 20 ms window: a fricative, a sound of speech that is quiet in the speech band. A take's silence
+    threshold is set by its vowels, and an "s" 35 dB under them reads as silence: a pause trim took the "s" of
+    "Step" and of "sirf". [] when the audio cannot be read."""
+    band = band_rms_db(src, (250, 4000))
+    hf = band_rms_db(src, (4000, 7900))
+    if not band or not hf:
+        return []
+    floor = sorted(hf)[int(0.1 * (len(hf) - 1))]
+    return [h - b >= FRICATIVE_DB and h > floor + HF_FLOOR_OVER_DB for b, h in zip(band, hf)]
+
+
+def speech_levels(lvl, fric, noise_db):
+    """The levels the join decisions read: a fricative window counts as just over the silence threshold."""
+    return [max(v, noise_db + 1.0) if k < len(fric) and fric[k] else v for k, v in enumerate(lvl)]
+
+
+def trim_fricatives(spans, fric):
+    """Measured silences without the fricatives at their edges (ffmpeg's silencedetect takes them for silence)."""
+    out = []
+    for a, b in spans:
+        i, j = int(a / RMS_WIN_S), int(b / RMS_WIN_S)
+        while i < j and i < len(fric) and fric[i]:
+            i += 1
+        while j > i and j - 1 < len(fric) and fric[j - 1]:
+            j -= 1
+        a2, b2 = (max(a, i * RMS_WIN_S), min(b, j * RMS_WIN_S))
+        if b2 - a2 >= 0.04:
+            out.append((a2, b2))
+    return out
+
+
 def audible_end(lvl, noise_db, t):
     """When the audio last had energy at or before t. Word END labels lag the
     audio (transcribers fold trailing silence into the last word), so splices
@@ -268,7 +319,8 @@ def next_sound(lvl, noise_db, t, limit):
 # audio has energy inside it (or just after it, when the label runs ahead of the word), and failing
 # that its end is clamped to a speech-rate length.
 def plausible_s(text):
-    return 0.1 + 0.065 * len(re.sub(r"[^a-z0-9]", "", str(text).lower()))
+    # Latin letters and digits, and Devanagari's letters and vowel signs (one each is about one sound)
+    return 0.1 + 0.065 * len(re.sub(r"[^a-z0-9\u0900-\u0963\u0966-\u097f]", "", str(text).lower()))
 
 
 def implausible(w):
@@ -811,6 +863,10 @@ def main():
         sys.exit("ERROR: cannot derive a silence threshold: " + diag["reason"] +
                  "\n  Measure with `ffmpeg -i <source> -af volumedetect -vn -f null -` and "
                  "pass --noise <dB> (about 10 dB above the mean volume).")
+    # the join decisions read fricatives as sound (the threshold above is still the vowels' own). Label fitting and
+    # the pause test keep the plain levels: a lone burst read as a fricative threw a 4 s label's fit 4 s late.
+    fric = [] if "bed" in diag else fricative_windows(a.source)
+    slvl = speech_levels(lvl, fric, noise) if fric else lvl
     labels = fit_labels(raw, lvl, noise)
     if labels:
         print(f"labels     {len(labels)} implausibly long word label(s) fitted to the audio: "
@@ -827,7 +883,7 @@ def main():
     if bed:
         heard = quiet_word_gaps(kept_words, gap_max, lvl, noise)
     else:
-        heard = detect_silence(a.source, noise, gap_max)
+        heard = trim_fricatives(detect_silence(a.source, noise, gap_max), fric)
         if not heard:
             sys.exit("ERROR: the threshold marked no silence at all. Pass --noise explicitly.")
         speech_db = sorted(lvl)[int(0.99 * (len(lvl) - 1))] if lvl else 0.0
@@ -836,7 +892,7 @@ def main():
     allcuts = merge(snap_and_pad(model_cuts, words, a.pad)
                     + silence_cuts(words, gap_max, gap_keep, heard)
                     + lead_trail_cuts(kept_words, dur, gap_keep))
-    allcuts = enforce_splice_budget(allcuts, words, model_cuts, splice_max, lvl, splice_noise)
+    allcuts = enforce_splice_budget(allcuts, words, model_cuts, splice_max, slvl, splice_noise)
     keeps = keep_ranges(d)
     if keeps:
         allcuts = carve(allcuts, keeps)
@@ -849,13 +905,13 @@ def main():
     if kept_words and allcuts and allcuts[-1]["end"] >= dur:   # let the last word ring out, up to the next sound
         last = max(w["end"] for w in kept_words)
         ring = min(dur, last + END_TAIL_S)
-        on = next_sound(lvl, splice_noise, last, ring) if splice_noise is not None else None
+        on = next_sound(slvl, splice_noise, last, ring) if splice_noise is not None else None
         allcuts[-1]["start"] = max(allcuts[-1]["start"], ring if on is None else min(ring, on))
     frames = kept_frames(allcuts, fps, dur, nframes, kept_words)
     moved, left = [], []
     if splice_noise is not None:
         removed = [(w["start"], w["end"]) for w in words if covered_by(w, model_cuts)]
-        frames, moved, left = fix_splices(frames, fps, lvl, noise, nframes, removed)
+        frames, moved, left = fix_splices(frames, fps, slvl, noise, nframes, removed)
     lead = d / "lead.json"
     if lead.exists():   # split halfway into the pauses either side, so no word is halved
         lc = resolve_spans([{**json.loads(lead.read_text(encoding="utf-8")), "kind": "alt_hook"}], toks)[0]
@@ -876,7 +932,7 @@ def main():
         if inside:
             last = max(w["end"] for w in inside)
             nxt = min([t["start"] for t in toks if t["start"] >= last + 0.01], default=dur)
-            on = next_sound(lvl, splice_noise, last, nxt) if splice_noise is not None else None
+            on = next_sound(slvl, splice_noise, last, nxt) if splice_noise is not None else None
             frames[-1][1] = max(e_, min(nframes, math.ceil(min(last + END_TAIL_S, nxt - 0.05, dur, on or dur) * fps)))
     # A kept piece of 3 frames or less is never a word, whatever the labels say (Whisper squeezes a fast run of words
     # into a frame or two): played, it is a click or half a syllable at a join. Dropped, after the joins have moved.
@@ -888,7 +944,7 @@ def main():
     spans = [{"start": round(s / fps, 6), "end": round(e / fps, 6)} for s, e in frames]
     final = sum(s["end"] - s["start"] for s in spans)
 
-    gaps = sorted(splice_gaps(allcuts, words, model_cuts, lvl, splice_noise))
+    gaps = sorted(splice_gaps(allcuts, words, model_cuts, slvl, splice_noise))
     print(f"pause      target {max_pause:.2f}s (tighten over {gap_max:.2f}s to {gap_keep:.2f}s)")
     print(f"source     {dur:.2f}s at {fps:.3f} fps")
     print(f"cuts       {len(model_cuts)} from spans.json, {len(allcuts)} after merging with pauses")

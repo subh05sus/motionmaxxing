@@ -60,14 +60,19 @@ WINDOW_WORDS = 80
 NEAR_WORDS = 8            # a 2-word repeat counts only this close
 # The word lists come from the edit's language pack (lib/mm/lang.py); use_lang() sets them.
 HARD_FILLERS = SOFT_FILLERS = STOP = META = LIKE_BEFORE = LOOSE_SOFT = None
+OR_WORDS = {"and", "or"}
 
 
 def use_lang(code):
-    """Read this edit's speech in its language: fillers, restarts, stop words, number folding."""
-    global HARD_FILLERS, SOFT_FILLERS, STOP, META, LIKE_BEFORE, LOOSE_SOFT
+    """Read this edit's speech in its language: fillers, restarts, stop words, number folding. Words compare by
+    key (textnorm.key: by sound in Hindi and Hinglish, so a take Whisper wrote in Devanagari matches its retake
+    written in Latin letters); fillers and cues are matched as written, in both scripts."""
+    global HARD_FILLERS, SOFT_FILLERS, STOP, META, LIKE_BEFORE, LOOSE_SOFT, OR_WORDS
     P = textnorm.use(code)
-    HARD_FILLERS, SOFT_FILLERS, STOP, META = P.hard_fillers, P.soft_fillers, P.stop, P.meta
+    HARD_FILLERS, SOFT_FILLERS, META = P.hard_fillers, P.soft_fillers, P.meta
+    STOP = {textnorm.key(w) for w in P.stop}
     LIKE_BEFORE, LOOSE_SOFT = P.like_before, P.loose_soft
+    OR_WORDS = {textnorm.key(w) for w in ("and", "or", "und", "oder", "और", "aur", "या", "ya")}
     return P
 
 
@@ -127,7 +132,7 @@ def norm_seq(toks):
     for i, t in enumerate(toks):
         if t.get("type") != "word":
             continue
-        out += [(w, i) for w in nwords(t["text"]) if w not in HARD_FILLERS]
+        out += [(textnorm.key(w), i) for w in nwords(t["text"]) if w not in HARD_FILLERS]
     return out
 
 
@@ -146,7 +151,7 @@ def clauses(toks):
 
 
 def opening(toks, a, b, n=6):
-    return [w for t in toks[a:b + 1] for w in nwords(t["text"]) if w not in HARD_FILLERS][:n]
+    return [textnorm.key(w) for t in toks[a:b + 1] for w in nwords(t["text"]) if w not in HARD_FILLERS][:n]
 
 
 def similar_openings(x, y):
@@ -194,7 +199,7 @@ def restarts(toks):
             # "a lot of tokens and a lot of money": the first run finished its thing, then "and"
             # starts a second item in the same shape. A list, not a retry.
             rest = [w for w, _ in seq[m + k:n]]
-            c = max((x for x, w in enumerate(rest) if w in ("and", "or")), default=None)
+            c = max((x for x, w in enumerate(rest) if w in OR_WORDS), default=None)
             listed = c is not None and any(w not in STOP for w in rest[:c]) and all(w in STOP for w in rest[c:])
             if k >= (2 if n - m <= NEAR_WORDS else 3) and (content or k >= 4) and not listed:
                 best = (m, k)
@@ -320,7 +325,8 @@ def find(toks, keep_fillers=False):
 
     seq = [(w, i) for i, t in enumerate(toks) for w in nwords(t["text"])]
     flat = " ".join(w for w, _ in seq)
-    for rx, kind in ((META, "meta"),) + tuple((re.compile(rf"\b{f}\b"), "filler") for f in SOFT_FILLERS):
+    # a cue or filler sits between spaces: \\b cannot bound Devanagari (a word ending in a vowel sign never ends)
+    for rx, kind in ((META, "meta"),) + tuple((re.compile(rf"(?<!\S){re.escape(f)}(?!\S)"), "filler") for f in SOFT_FILLERS):
         for m in rx.finditer(flat):
             w0 = flat[:m.start()].count(" ")
             w1 = w0 + m.group(0).count(" ")
@@ -525,7 +531,7 @@ def remap_beats(raw, old_spans, new_spans, beats):
     kept as is (plan.py takes the next time the word is said). A beat whose word was cut follows the same
     word said again in the same sentence (the retake kept); with none it is dropped. raw: the source words."""
     from build_timeline import is_kept
-    key = lambda t: re.sub(r"[^\w'’-]+", "", t).lower()      # plan.py clean().lower()
+    key = lambda t: re.sub(rf"[^{lang.WCH}'’-]+", "", t).lower()      # plan.py clean().lower()
     old = [i for i, w in enumerate(raw) if is_kept(w, old_spans)]
     new = {i for i, w in enumerate(raw) if is_kept(w, new_spans)}
     sentence, n = [], 0      # a sentence ends at . ? ! (a false start before a retake has none, so it joins it)

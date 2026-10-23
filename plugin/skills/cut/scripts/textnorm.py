@@ -7,11 +7,14 @@ Transcribers do not spell the same sound the same way twice: one pass writes
 must fold away before comparing.
 
 Rules, deliberately narrow:
-  - punctuation and case are dropped; hyphens become spaces; letters of every language stay (ä, ö, ü, ß)
+  - punctuation and case are dropped; hyphens become spaces; letters of every language stay (ä, ö, ü, ß, and
+    Devanagari with its vowel signs, which Python's \\w would cut off: lang.WCH)
   - "%" becomes the language's word for it ("percent", "prozent")
   - number words fold to digits, but a bare small number word does not ("one of the best", "ein Video" stay)
   - German: compound number words ("fünfundzwanzig") fold, "1.500" is fifteen hundred and "1,5" one point five
   - a few same-sound contractions ("wanna" / "want to", "gibt's" / "gibt es"). Never a real word difference.
+  - Hindi and Hinglish: every token becomes its sound key (lang.key: करना, karna and karnaa are one word, the
+    script Whisper chose does not matter), Hindi number words fold like English ones ("पच्चीस" 25, "दो लाख" 200000)
 
 The language: use(code) once per script, with lang.of(<edit dir>) (meta.json, which transcribe.py writes).
 MM_LANG overrides it; English by default.
@@ -23,7 +26,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
-from mm import lang as L  # noqa: E402
+from mm import hindi as H, lang as L  # noqa: E402
 
 UNITS = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
          "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
@@ -48,7 +51,7 @@ def use(code):
 
 def norm(s):
     """Spoken content only. Hyphens split; '%' spoken; everything else dropped."""
-    s = str(s).lower().replace("%", f" {LANG.percent} ").replace("\u2019", "'")
+    s = H.clean(s).lower().replace("%", f" {LANG.percent} ").replace("\u2019", "'")
     if LANG.code == "de":
         # German writes 1.500 for fifteen hundred and 1,5 for one point five.
         s = re.sub(r"(?<=\d)\.(?=\d{3}(?!\d))", "", s)
@@ -57,7 +60,7 @@ def norm(s):
         # Thousands separators die BEFORE punctuation becomes whitespace, or a transcriber's
         # "1,500" splits into "1" and "500" and never matches "fifteen hundred".
         s = re.sub(r"(?<=\d),(?=\d)", "", s)
-    return re.sub(r"[^\w' ]+|_", " ", s).strip()
+    return re.sub(rf"[^{L.WCH}' ]+|_", " ", s).strip()
 
 
 def canon(toks):
@@ -69,6 +72,8 @@ def canon_src(toks):
     """canon, with the index in `toks` each output token came from: [(token, index)]."""
     if LANG.code == "de":
         return canon_src_de(toks)
+    if LANG.numbers == "hi":
+        return canon_src_hi(toks)
     out, i = [], 0
     while i < len(toks):
         t = toks[i]
@@ -138,6 +143,43 @@ def canon_src_de(toks):
     return out
 
 
+def canon_src_hi(toks):
+    """Hindi and Hinglish: every word as its sound key, number words (Hindi or English, either script) as digits
+    with a scale word multiplying the number before it ("दो लाख", "5 hazaar"), a small number word on its own kept
+    as a word ("एक", "do"), and the same-sound spellings expanded."""
+    out, i = [], 0
+    while i < len(toks):
+        t = toks[i]
+        if t in LANG.spoken_same:
+            out.extend((L.key(x, "hi"), i) for x in LANG.spoken_same[t].split())
+            i += 1
+            continue
+        v = int(t) if t.isdigit() else H.number(t)
+        if v is None and (t in UNITS or t in TENS):
+            v = UNITS.get(t, TENS.get(t))
+        if v is None or (H.scale(t) and not t.isdigit()):
+            out.append((L.key(t, "hi"), i))
+            i += 1
+            continue
+        nxt = toks[i + 1] if i + 1 < len(toks) else ""
+        sc = H.scale(nxt) or SCALES.get(nxt)
+        if sc and sc > 100:
+            out.append((str(v * sc), i))
+            i += 2
+            continue
+        if not t.isdigit() and v < BARE_FOLD_MIN:
+            out.append((L.key(t, "hi"), i))
+        else:
+            out.append((str(v), i))
+        i += 1
+    return out
+
+
+def key(w):
+    """A normalised word as the language compares it: by sound in Hindi and Hinglish, as written elsewhere."""
+    return L.key(w, LANG.code)
+
+
 def words(text):
     return canon([w for w in norm(text).split() if w])
 
@@ -204,9 +246,9 @@ def locate(needle, toks):
     hay, owner = [], []
     for i, t in enumerate(toks):
         for w in nwords(t.get("text", "")):
-            hay.append(w)
+            hay.append(key(w))
             owner.append(i)
-    need = nwords(needle)
+    need = [key(w) for w in nwords(needle)]
     if not need:
         return []
     return [(owner[i], owner[i + len(need) - 1])

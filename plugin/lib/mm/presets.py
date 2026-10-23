@@ -215,7 +215,7 @@ def phrase(edit_dir=None):
             d = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        ws = [re.sub(r"[^\w'’-]", "", w.get("text", "")) for w in (d.get("words", []) if isinstance(d, dict) else d)
+        ws = [re.sub(r"[^\w\u0900-\u0963\u0966-\u097f'’-]", "", w.get("text", "")) for w in (d.get("words", []) if isinstance(d, dict) else d)
               if isinstance(w, dict) and w.get("type", "word") == "word"]
         ws = [w for w in ws if w]
         starts = [i for i in range(len(ws) - 4) if ws[i][:1].isupper()] + ([0] if len(ws) >= 5 else [])

@@ -45,10 +45,18 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parents[2] / "lib"))
 import build_timeline as B  # noqa: E402
+from mm import hindi as H, lang as L  # noqa: E402
+
+LANG = "en"   # the edit's language (meta.json): check() sets it; words compare by sound in Hindi and Hinglish
 
 RMS_S = 0.02
 BAND = (250, 4000)          # the speech band: hum under it and hiss over it make no run
+HF_BAND = (4000, 7900)      # a fricative's band: "s", "sh", "f" are loud here and quiet in the speech band
+FRICATIVE_DB = 1.0          # a low stretch this much louder over 4 kHz than in the speech band is a fricative (a
+                            # word's "s"), not a breath: cut as one, "Step" lost its "s" at a join. Measured: 119 real
+                            # breaths in a take sit at -14 dB (median), +0.2 dB at most; an "s" at +2 dB
 OVER_FLOOR_DB = 12.0        # a window is a run this far over the take's 10th percentile
 LOW_DB = 22.0               # ...and a breath (or a pause over room noise) this far under its loud speech
 BREATH_MIN_S = 0.12         # a low stretch this long splits a run (a stop consonant's closure is shorter)
@@ -62,7 +70,11 @@ RESTART_GAP_S = 1.2         # a false start is said again within this
 TRIM_JOIN_S = 0.6           # pieces this close in the take are one take with a pause trimmed
 HEAR_PAD_S = 0.25           # silence around a stretch when it is heard, so its first and last sound are not lost
 NOISE_TEXT = {"vielen dank", "danke", "danke schön", "untertitel", "untertitel im auftrag des zdf", "amen", "tschüss",
-              "musik", "applaus", "lachen", "thank you", "thanks for watching", "you", "bye", "music", "the end"}
+              "musik", "applaus", "lachen", "thank you", "thanks for watching", "you", "bye", "music", "the end",
+              # what Whisper writes for silence in Hindi: thanks, "subscribe", music
+              "धन्यवाद", "शुक्रिया", "सब्सक्राइब", "सब्सक्राइब करें", "चैनल को सब्सक्राइब करें", "थैंक यू", "थैंक्यू", "बाय",
+              "म्यूज़िक", "म्यूजिक", "संगीत", "dhanyavaad", "dhanyawad", "shukriya", "subscribe", "please subscribe",
+              "like and subscribe", "thank you so much"}
 
 
 def norm_words(text):
@@ -70,7 +82,7 @@ def norm_words(text):
     t = text.strip()
     if re.fullmatch(r"[\[(*].*[\])*]", t):
         return []
-    return [w for w in re.sub(r"[^\w\s'-]", " ", t.lower()).split() if any(c.isalnum() for c in w)]
+    return [w for w in re.sub(rf"[^{L.WCH}\s'-]", " ", H.clean(t).lower()).split() if any(c.isalnum() for c in w)]
 
 
 def is_noise(text, dur):
@@ -86,11 +98,25 @@ NUMBERS = {w: str(n) for n, ws in enumerate((
     "acht eight", "neun nine", "zehn ten", "elf eleven", "zwölf twelve")) for w in ws.split()}
 
 
+def num(w):
+    """A number word or digit as its digits ("eins", "one", and in Hindi "पाँच" / "paanch"), else None."""
+    if w in NUMBERS:
+        return NUMBERS[w]
+    if L.pack(LANG).numbers == "hi":
+        v = H.number(w)
+        return None if v is None else str(v)
+    return None
+
+
 def sim(a, b):
-    """How alike two heard words are; a digit and its word are the same ("1" and "eins": one hearing writes digits)."""
-    if NUMBERS.get(a, a) == NUMBERS.get(b, b):
+    """How alike two heard words are; a digit and its word are the same ("1" and "eins": one hearing writes digits).
+    In Hindi and Hinglish two words are compared by sound, whichever script each hearing wrote them in."""
+    if (num(a) or a) == (num(b) or b):
         return 1.0
-    return difflib.SequenceMatcher(None, a, b).ratio()
+    ka, kb = L.key(a, LANG), L.key(b, LANG)
+    if ka == kb:
+        return 1.0
+    return difflib.SequenceMatcher(None, ka, kb).ratio()
 
 
 def starts_like(x, y, x_dur, y_dur, one_max=0.7):
@@ -105,14 +131,15 @@ def starts_like(x, y, x_dur, y_dur, one_max=0.7):
         return False
     for k in range(1, len(x)):
         last = k == len(x) - 1
-        if not (sim(x[k], y[k]) >= 0.6 or (last and len(x[k]) >= 3 and y[k].startswith(x[k][:3]))):
+        if not (sim(x[k], y[k]) >= 0.6 or (last and len(x[k]) >= 3 and L.key(y[k], LANG).startswith(L.key(x[k], LANG)[:3]))):
             return False
     return True
 
 
-def stretches(lvl, thr, low):
+def stretches(lvl, thr, low, hf=None):
     """[(start, end, "speech" | "breath")] over the take: runs over thr (a one-window gap closed), each split where it
-    stays under low for BREATH_MIN_S or longer."""
+    stays under low for BREATH_MIN_S or longer. hf: levels over 4 kHz (hf_levels); a low stretch FRICATIVE_DB louder
+    there is a fricative, the speech's own sound."""
     runs, s = [], None
     for i, v in enumerate(lvl):
         if v > thr and s is None:
@@ -141,6 +168,9 @@ def stretches(lvl, thr, low):
         for sg in segs:                      # a short dip belongs to the speech around it
             if sg[2] and sg[1] - sg[0] < need:
                 sg[2] = False
+            elif sg[2] and hf is not None and len(hf) >= sg[1] and \
+                    sum(hf[sg[0]:sg[1]]) / (sg[1] - sg[0]) - sum(lvl[sg[0]:sg[1]]) / (sg[1] - sg[0]) >= FRICATIVE_DB:
+                sg[2] = False                # a fricative, not a breath
         joined = []
         for sg in segs:
             if joined and joined[-1][2] == sg[2]:
@@ -152,10 +182,15 @@ def stretches(lvl, thr, low):
     return out
 
 
-def band_levels(src):
+def hf_levels(src):
+    """20 ms levels over 4 kHz, the band a fricative is loud in."""
+    return band_levels(src, HF_BAND)[0]
+
+
+def band_levels(src, band=BAND):
     import numpy as np
     raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(src), "-vn", "-ac", "1", "-ar", "16000", "-af",
-                          f"highpass=f={BAND[0]},lowpass=f={BAND[1]}", "-f", "s16le", "-"], capture_output=True).stdout
+                          f"highpass=f={band[0]},lowpass=f={band[1]}", "-f", "s16le", "-"], capture_output=True).stdout
     x = np.frombuffer(raw, np.int16).astype(np.float32) / 32768.0
     n = int(16000 * RMS_S)
     m = (x[: len(x) // n * n].reshape(-1, n) ** 2).mean(1)
@@ -388,11 +423,13 @@ def check(d, fix=False):
         sys.exit(f"ERROR: no report.json in {d}: run build_timeline.py first")
     r = json.loads(rep.read_text(encoding="utf-8"))
     src, fps = r["source"], r["fps"]
+    global LANG
     meta = d / "meta.json"
     code = (json.loads(meta.read_text(encoding="utf-8")).get("lang") if meta.exists() else None) or "auto"
+    LANG = code if code != "auto" else "en"
     lvl, floor, loud = band_levels(src)
     thr = floor + OVER_FLOOR_DB
-    all_units = stretches(lvl, thr, max(thr + 3, loud - LOW_DB))
+    all_units = stretches(lvl, thr, max(thr + 3, loud - LOW_DB), hf_levels(src))
     frames = r["frames"]
     pieces = [(f[0] / fps, f[1] / fps) for f in frames]
     units = []
@@ -456,10 +493,20 @@ def demo():
     assert not starts_like(["teach"], ["step", "3", "teach"], 0.3, 2.0)
     assert not starts_like(["and", "so"], ["and", "when", "it", "fits"], 0.5, 2.0)   # two lines, not a restart
     assert sim("1", "eins") == 1.0 and sim("drei", "3") == 1.0 and sim("1", "2") < 0.75
+    global LANG
+    LANG = "hinglish"
+    assert sim("पाँच", "5") == 1.0 and sim("आज", "aaj") == 1.0 and sim("दिखाऊँगा", "dikhaunga") == 1.0
+    assert norm_words("दोस्तों, आज मैं आपको दिखाऊँगा।") == ["दोस्तों", "आज", "मैं", "आपको", "दिखाऊँगा"]
+    assert is_noise("धन्यवाद।", 0.3) and not is_noise("आज", 0.3)
+    assert starts_like(["आज", "मैं", "आपको", "दिखा"], ["aaj", "main", "aapko", "dikhaunga", "kaise"], 0.9, 2.4)
+    LANG = "en"
     # levels: a run with a 0.3 s breath at -40 before speech at -15, and a 60 ms dip inside the speech
     lvl = [-60] * 5 + [-40] * 15 + [-55] * 2 + [-15] * 10 + [-38] * 3 + [-15] * 10 + [-60] * 5
     st = stretches(lvl, -48, -37)
     assert st == [(0.1, 0.4, "breath"), (0.44, 0.9, "speech")], st      # the 40 ms gap splits; the dip stays in
+    # the same stretch loud over 4 kHz: a fricative ("s"), part of the word, not a breath
+    hf = [-90] * 5 + [-20] * 15 + [-90] * 2 + [-30] * 10 + [-40] * 3 + [-30] * 10 + [-90] * 5
+    assert stretches(lvl, -48, -37, hf) == [(0.1, 0.4, "speech"), (0.44, 0.9, "speech")], stretches(lvl, -48, -37, hf)
     # the joins one take had (source seconds): a tail and a breath before "And then", the end of the first
     # "Step 3" before the second, a cut-off "From then on it lear-" before the whole line, a lone "So" before "So you have"
     pieces = [(81.70, 85.13), (95.93, 100.40), (125.33, 129.50), (130.93, 131.77), (131.87, 133.77), (201.03, 202.77)]

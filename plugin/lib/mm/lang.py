@@ -3,8 +3,17 @@
     from mm import lang
     P = lang.pack(lang.of(edit_dir))      # the edit's language (meta.json), MM_LANG, else "en"
     P.hard_fillers  P.soft_fillers  P.stop  P.meta  P.filler_prompt  P.common  P.hook_stop  P.hook_generic
+    P.whisper  P.script                   # the code Whisper is run with; the captions' script ("latn"/"deva")
     lang.set_meta(edit_dir, lang="de")    # transcribe.py records what Whisper heard
+    lang.key("करना", "hi") == lang.key("karna", "hi")   # words compared by sound in Hindi and Hinglish
+    re.sub(rf"[^{lang.WCH}' ]+", " ", text)   # punctuation out, every script's words whole (Python's \\w drops
+                                              # Devanagari vowel signs: नमस्ते would split into नमस + त)
     python3 lang.py demo
+
+Languages: en English, de German, hi Hindi (captions in Devanagari), hinglish Hindi with English words (captions in
+Roman letters, the way Hinglish creators write). Hindi and Hinglish are heard the same way (Whisper's "hi", which
+writes Hindi in Devanagari and keeps most English words in Latin letters); they differ in the captions' script.
+Auto-detected Hindi is Hinglish when English words make a share of it (latin_share).
 
 A pack never decides a cut. It names the places to look (retakes.py candidates), how to fold two transcripts of
 the same speech into the same tokens (textnorm), and what to prompt Whisper with so it keeps the hesitations the cut
@@ -23,12 +32,25 @@ import os
 import re
 from pathlib import Path
 
+try:
+    from mm import hindi  # noqa: E402
+except ImportError:      # lang.py run on its own
+    import hindi  # type: ignore  # noqa: E402
+
 DEFAULT = "en"
+# Word characters in every script the editor reads: \\w, plus Latin combining accents and the Devanagari vowel signs,
+# nasal marks and digits (Python's \\w takes the signs for punctuation). The danda (।) stays punctuation.
+WCH = r"\w\u0300-\u036f\u0900-\u0963\u0966-\u097f\ua8e0-\ua8ff\u1cd0-\u1cff"
+LATIN_SHARE_HINGLISH = 0.12   # auto-detected Hindi with this share of words in Latin letters is Hinglish
 
 
 class Pack:
     def __init__(self, code, **kw):
         self.code = code
+        self.whisper = code
+        self.script = "latn"
+        self.numbers = None
+        self.dtw = False      # Whisper's DTW word times (whisper.cpp -dtw): Hindi's default times run up to 1 s early
         for k, v in kw.items():
             setattr(self, k, v)
 
@@ -96,14 +118,81 @@ alle jede jeder jetzt heute""".split()),
               "weil", "wenn", "also"},
 )
 
-PACKS = {"en": EN, "de": DE}
+# Hindi and Hinglish. Whisper writes Hindi in Devanagari and English words mostly in Latin letters, and the same word
+# can come back in either script: every list holds both, and the cut compares words by key() (by sound).
+def _space_phrases(*alts):
+    """A restart cue as a regex over space-joined normalised words. \\b cannot bound Devanagari (a word ending in a
+    vowel sign never ends for it), so the cue sits between spaces."""
+    return re.compile(r"(?<!\S)(?:" + "|".join(alts) + r")(?!\S)")
+
+
+_HI_STOP = set("""है हैं था थी थे का की के को में से पर और भी तो ही ये वो यह वह मैं हम आप तुम कि जो क्या नहीं ना एक
+इस उस इसे उसे इसको उसको अपना अपनी अपने कर करो करना हो होता होती होते रहा रही रहे गया गई गए दिया किया लिया
+hai hain tha thi the ka ki ke ko mein me se par aur bhi toh to hi ye yeh wo woh main mai hum aap tum jo kya nahi
+nahin na ek is us ise use isko usko apna apni apne kar karo karna ho hota hoti hote raha rahi rahe gaya gayi gaye
+diya kiya liya""".split()) | EN.stop
+_HI_COMMON = set("""है हैं था थी थे का की के को में से पर और भी तो ही ये वो यह वह मैं हम आप तुम कि जो क्या नहीं ना
+आज कल अब यहाँ वहाँ दोस्तों नमस्ते हाँ हां ठीक अच्छा पहला दूसरा तीसरा""".split()) | _HI_STOP | EN.common
+_HI_DANGLING = set("""और लेकिन पर तो कि का की के को से में क्योंकि अगर जो जैसे aur lekin par toh ki ka ke ko se mein
+kyunki agar jo jaise""".split()) | EN.dangling
+_HI = dict(
+    hard_fillers={"अम्म", "उम्म", "हम्म", "अं", "उं", "ऊं", "अ", "उह", "आं", "umm", "um", "uh", "uhh", "hmm", "mm",
+                  "hm", "erm", "ummm"},
+    soft_fillers=["मतलब", "matlab", "बेसिकली", "basically", "एक्चुअली", "actually", "यानी", "yaani", "you know",
+                  "i mean", "like"],
+    loose_soft={"मतलब", "matlab", "बेसिकली", "basically", "एक्चुअली", "actually", "यानी", "yaani", "like"},
+    like_before={"और", "aur", "तो", "toh", "लेकिन", "lekin", "पर", "par", "उम्म", "umm", "अम्म", "um", "and", "so", "but"},
+    stop=_HI_STOP,
+    meta=_space_phrases("रुको", "रुकिए", "रुक जाओ", "एक सेकंड", "एक second", "ek second", "ek sec", "एक मिनट",
+                        "ek minute", "फिर से", "phir se", "fir se", "दोबारा", "dobara", "dobaara", "सॉरी", "sorry",
+                        "वेट", "wait", "नहीं नहीं", "nahi nahi", "गलत", "galat", "एक बार और", "ek baar aur",
+                        "let me (?:start|say (?:that|it)|try)(?: again| over)?", "start again", "one more time",
+                        "scratch that"),
+    common=_HI_COMMON,
+    hook_stop=_HI_STOP | EN.hook_stop,
+    hook_generic={"वीडियो", "video", "ai", "एआई", "tool", "टूल", "चीज़", "चीज", "tips", "टिप्स", "guide"},
+    hook_verbs=set("""बनाना बनाओ बनाएं सीखो सीखें शुरू इस्तेमाल use start build learn बदलो बदल""".split()),
+    percent="percent",
+    spoken_same={"परसेंट": "percent", "प्रतिशत": "percent", "pratishat": "percent"},
+    dangling=_HI_DANGLING,
+    whisper="hi",
+    numbers="hi",
+    dtw=True,
+)
+HI = Pack("hi", script="deva",
+          filler_prompt="तो दोस्तों, अम्म, मतलब, हाँ तो, एक सेकंड, रुको, सॉरी, फिर से बोलता हूँ। आज हम एआई टूल्स के बारे में बात करेंगे।",
+          **_HI)
+HINGLISH = Pack("hinglish", script="latn",
+                filler_prompt="तो दोस्तों, अम्म, मतलब, basically, हाँ तो, एक second, रुको, sorry, फिर से बोलता हूँ। "
+                              "आज हम AI tools के बारे में बात करेंगे।",
+                **_HI)
+
+PACKS = {"en": EN, "de": DE, "hi": HI, "hinglish": HINGLISH}
+NAMES = {"en": "English", "de": "German", "hi": "Hindi", "hinglish": "Hinglish"}
 
 
 def pack(code=None):
-    """The pack for a language code ("de", "de-DE", "german"); unknown languages get English's lists."""
-    c = (code or DEFAULT).lower().replace("_", "-").split("-")[0]
-    c = {"german": "de", "deutsch": "de", "english": "en"}.get(c, c)
+    """The pack for a language code ("de", "de-DE", "german", "hi", "hindi", "hinglish", "hi-Latn"); unknown
+    languages get English's lists."""
+    raw = (code or DEFAULT).lower().replace("_", "-")
+    if raw in ("hinglish", "hi-latn", "hi-en", "hindi-english"):
+        return HINGLISH
+    c = raw.split("-")[0]
+    c = {"german": "de", "deutsch": "de", "english": "en", "hindi": "hi"}.get(c, c)
     return PACKS.get(c, EN)
+
+
+def key(w, code=None):
+    """How two words are compared: by sound in Hindi and Hinglish (either script, most spellings), as written
+    (lower case) in every other language."""
+    return hindi.key(w) if pack(code).numbers == "hi" else str(w).lower()
+
+
+def latin_share(words):
+    """The share of a transcript's words written in Latin letters: English words in Hindi speech."""
+    ws = [w for w in (x if isinstance(x, str) else x.get("text", "") for x in words) if re.search(r"\w", w)]
+    lat = [w for w in ws if re.search(r"[A-Za-z]", w) and not hindi.has_deva(w)]
+    return len(lat) / len(ws) if ws else 0.0
 
 
 def meta_path(edit_dir):
@@ -203,13 +292,16 @@ def keyterms(text, code=None):
     German rarely spells (Claude, Cursor), not a common word."""
     P = pack(code)
     out, seen = [], set()
-    for w in re.findall(r"[\wÄÖÜäöüß][\w.+#'-]*[\w+#]|[\wÄÖÜäöüß]", text):
+    for w in re.findall(rf"[{WCH}][{WCH}.+#'-]*[{WCH}+#]|[{WCH}]", hindi.clean(text)):
         w = re.sub(r"'s$", "", w)
         low = w.lower()
         if len(w) < 2 or low in P.common or low in seen:
             continue
         digit = any(c.isdigit() for c in w)
-        if P.code == "de":
+        if P.numbers == "hi":
+            # Hindi: a name, product or term is in Latin letters (English inside Hindi speech) or has a digit
+            keep = digit or (bool(re.search(r"[A-Za-z]", w)) and not hindi.has_deva(w) and (w[0].isupper() or len(w) > 3))
+        elif P.code == "de":
             inner = any(c.isupper() for c in w[1:]) and not w.isupper()
             caps = w.isupper() and len(w) >= 2 and w.isalpha()
             foreign = w[0].isupper() and bool(_FOREIGN.search(w))
@@ -237,6 +329,18 @@ def demo():
                  "Die KI schreibt den Code, Cursor macht den Rest.", "de")
     assert k == ["Claude", "Code", "ChatGPT", "15", "KI", "Cursor"], k
     assert keyterms("Today I built it with Claude Code and GPT-4o.", "en") == ["Claude", "Code", "GPT-4o"]
+    # Hindi and Hinglish: both scripts in every list, words compared by sound, terms are the Latin words
+    assert pack("hi").code == "hi" and pack("hindi").code == "hi" and pack("hinglish").code == "hinglish"
+    assert pack("hi-Latn").code == "hinglish" and pack("hi").whisper == pack("hinglish").whisper == "hi"
+    assert pack("hi").script == "deva" and pack("hinglish").script == "latn" and pack("de").script == "latn"
+    assert key("करना", "hi") == key("karna", "hinglish") and key("Karna", "en") == "karna"
+    assert HINGLISH.meta.search("तो रुको फिर से बोलता हूँ") and HINGLISH.meta.search("sorry phir se")
+    assert not HINGLISH.meta.search("रुकोगे"), "a cue is a whole word"
+    assert "अम्म" in HI.hard_fillers and "umm" in HINGLISH.hard_fillers
+    assert keyterms("आज मैं आपको Claude Code और ChatGPT से 15 मिनट में app बनाना दिखाऊँगा", "hinglish") == \
+        ["Claude", "Code", "ChatGPT", "15"]
+    assert abs(latin_share(["आज", "मैं", "AI", "assistant", "बनाऊँगा"]) - 0.4) < 1e-9 and latin_share([]) == 0.0
+    assert re.sub(rf"[^{WCH}' ]+", " ", "नमस्ते, दोस्तों। आज?").split() == ["नमस्ते", "दोस्तों", "आज"]
     with tempfile.TemporaryDirectory() as t:
         assert of(t) == "en"
         set_meta(t, lang="de", engine="whispercpp")

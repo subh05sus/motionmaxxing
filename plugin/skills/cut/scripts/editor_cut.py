@@ -24,6 +24,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+from mm.lang import WCH  # noqa: E402
+
 WIN_S, HOP_S, NEAR_S = 0.5, 0.1, 1.5
 MATCH, FALLBACK = 0.6, 0.7      # a window counts at this correlation; under FALLBACK near the words, search everywhere
 FRAME_S, STRONG = 0.02, 0.8     # the join read in 20 ms frames; a frame belongs to a piece at this correlation
@@ -38,7 +41,7 @@ def pcm(src, sr):
 
 
 def _norm(s):
-    return re.sub(r"[^\w]+", "", s.lower())
+    return re.sub(rf"[^{WCH}]+|_", "", s.lower())
 
 
 def guide_of(raw_words, pub_words):

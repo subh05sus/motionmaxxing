@@ -17,6 +17,7 @@ kept the first take of a line 5 times in 16 on one reel). Still close: watch the
 The source: --source, else <edit>/source.mp4 or joined.mp4, else report.json's "source".
 """
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -71,7 +72,7 @@ def loudness(src, a, b):
 def numbers(words, a, b, fillers):
     ws = [w for w in words if w.get("type", "word") == "word" and a - 0.05 <= w["start"] and w["end"] <= b + 0.05]
     gaps = [y["start"] - x["end"] for x, y in zip(ws, ws[1:]) if y["start"] - x["end"] >= PAUSE_S]
-    norm = lambda t: "".join(c for c in t.lower() if c.isalnum())   # noqa: E731
+    norm = lambda t: re.sub(rf"[^{lang.WCH}]|_", "", t.lower())   # noqa: E731
     return {"seconds": round(b - a, 2), "words": len(ws), "rate": round(len(ws) / max(b - a, 0.1), 1),
             "pauses": len(gaps), "fillers": sum(1 for w in ws if norm(w["text"]) in fillers),
             "text": " ".join(w["text"] for w in ws), "last": ws[-1]["text"] if ws else ""}
