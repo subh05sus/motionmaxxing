@@ -2649,7 +2649,9 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
             "durationInFrames": round(duration * fps),
             "look": pick_look(style, profile, prof_mod),
             "motion": pick_motion(style)}
-    grade = grade_for(style, Path(edit_dir) / meta["video"]) if edit_dir else None
+    # a video with its own look (adjust.py: matched light and colour) needs no creator grade on top
+    own_look = bool(edit_dir) and (Path(edit_dir) / "adjust.json").exists() and __import__("adjust").look_of(edit_dir)
+    grade = grade_for(style, Path(edit_dir) / meta["video"]) if edit_dir and not own_look else None
     if grade:
         head["grade"] = grade
     if ((layout or {}).get("mode") or (style.get("layout") or {}).get("mode")) == "letterbox":

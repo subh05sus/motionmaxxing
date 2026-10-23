@@ -91,17 +91,56 @@ def proxy_filter(sw, sh, w, h):
             f"[bg][fg]overlay=(W-w)/2:0,setsar=1")
 
 
-def footage_filter(plan, sw, sh):
+def footage_filter(plan, sw, sh, look=False):
     """The cut as the render draws it under everything: proxy_filter, or for the letterbox layout the cut
-    scaled into its band on black (the render proxy is that frame; the checks read the same)."""
+    scaled into its band on black (the render proxy is that frame; the checks read the same). look: the video has its
+    own look (adjust.py), which replaces the creator's grade and runs before this."""
     w, h = plan["width"], plan["height"]
     lay = plan.get("layout") or {}
-    g = plan.get("grade")   # the creator's grade (plan.py grade_for), burned into the copy so every check reads it
+    g = None if look else plan.get("grade")   # the creator's grade (plan.py grade_for), burned into the copy so every check reads it
     grade = f",colorchannelmixer=rr={g['brightness']}:gg={g['brightness']}:bb={g['brightness']},hue=s={g['saturate']}" if g else ""
     if lay.get("mode") != "letterbox":
         return proxy_filter(sw, sh, w, h) + grade
     y, bh = (round(v / 100 * h / 2) * 2 for v in lay["band"][1::2])
     return f"scale={w}:{bh},setsar=1,pad={w}:{h}:0:{y}:black"
+
+
+def face_light_mask(edit, cut, m):
+    """The face light's mask (adjust.py mask) for this cut, made again when the cut, its face track or the look changed."""
+    import adjust
+    out = edit / ".adjust" / "facelight.mkv"
+    srcs = [cut, edit / "face.json", edit / "adjust.json"]
+    if not out.exists() or any(f.exists() and f.stat().st_mtime > out.stat().st_mtime for f in srcs):
+        frames = int(round(m["duration"] * m["fps"])) + 2
+        subprocess.run([venv_python(), str(Path(adjust.__file__)), "mask", str(edit), "--out", str(out),
+                        "--size", f"{m['width']}x{m['height']}", "--fps", str(m["fps"]), "--frames", str(frames)], check=True)
+    return out
+
+
+def grade_cutouts(src, dst, look, mask, fps):
+    """The speaker's cutout frames (NNNNNN.png, the plan's frame numbers) through the footage's look, each run of
+    consecutive frames in one ffmpeg pass with the face light's mask from the same frame on."""
+    import adjust
+    files = sorted(src.glob("*.png"))
+    sig = json.dumps(look, sort_keys=True) + f"|{mask.stat().st_mtime_ns}|{len(files)}|{max((f.stat().st_mtime_ns for f in files), default=0)}"
+    marker = dst / ".look"
+    if marker.exists() and marker.read_text(encoding="utf-8") == sig:
+        return
+    dst.mkdir(parents=True, exist_ok=True)
+    nums = [int(f.stem) for f in files if f.stem.isdigit()]
+    runs, start = [], None
+    for i, n in enumerate(nums):
+        if start is None:
+            start = n
+        if i + 1 == len(nums) or nums[i + 1] != n + 1:
+            runs.append((start, n))
+            start = None
+    print(f"giving {len(nums)} cutout frames the look", flush=True)
+    for a, b in runs:
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-framerate", str(fps), "-start_number", str(a), "-i", str(src / "%06d.png"),
+                        "-ss", f"{a / fps:.6f}", "-i", str(mask), "-filter_complex", adjust.graph(look, has_alpha=True),
+                        "-frames:v", str(b - a + 1), "-start_number", str(a), str(dst / "%06d.png")], check=True)
+    marker.write_text(sig, encoding="utf-8")
 
 
 def public_rels(plan):
@@ -121,7 +160,7 @@ def fingerprint(edit, plan_path, plan):
     """What a render is made from: the plan's bytes, the renderer's source, and the size and time of the cut and
     every file it reads. Two renders with one fingerprint are the same video."""
     h = hashlib.sha1(plan_path.read_bytes())
-    files = [edit / plan["video"], *(edit / r for r in public_rels(plan))]
+    files = [edit / plan["video"], *(edit / r for r in public_rels(plan)), edit / "adjust.json", edit / ".adjust" / "facelight.mkv"]
     files += [f for c in plan.get("cutouts", []) for f in sorted((edit / c["src"]).glob("*"))]
     files += sorted((SRC / "src").rglob("*")) + [SRC / "render.mjs"]
     for f in files:
@@ -145,19 +184,30 @@ def prepare_public(edit, plan, tag):
     sys.path.insert(0, str(Path(__file__).parent))
     from plan import probe
     m = probe(cut)
-    vf, made = footage_filter(plan, m["width"], m["height"]), pub / f"{plan['video']}.vf"   # a new layout remakes it
-    if not proxy.exists() or proxy.stat().st_mtime < cut.stat().st_mtime or not made.exists() or made.read_text(encoding="utf-8") != vf:
-        print(f"preparing {plan['width']}x{plan['height']} copy of {cut.name}", flush=True)
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(cut), "-filter_complex", vf,
+    # the video's own look (adjust.py: the light on the face, the colour), burned into the copy and the cutouts alike
+    import adjust
+    look = adjust.look_of(edit)
+    mask = face_light_mask(edit, cut, m) if look else None
+    vf = footage_filter(plan, m["width"], m["height"], look=bool(look))
+    if look:
+        vf = adjust.graph(look, tail=vf)
+    made = pub / f"{plan['video']}.vf"   # a new layout or look remakes it
+    sig = vf + (f"|{mask.stat().st_mtime_ns}" if mask else "")
+    if not proxy.exists() or proxy.stat().st_mtime < cut.stat().st_mtime or not made.exists() or made.read_text(encoding="utf-8") != sig:
+        print(f"preparing {plan['width']}x{plan['height']} copy of {cut.name}" + (" with its look" if look else ""), flush=True)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(cut), *(["-i", str(mask)] if mask else []), "-filter_complex", vf,
                         "-c:v", "libx264", "-crf", "18", "-preset", "veryfast", "-g", "15",
                         "-keyint_min", "15", "-sc_threshold", "0", "-pix_fmt", "yuv420p",
                         "-c:a", "copy", str(proxy)], check=True)
-        made.write_text(vf, encoding="utf-8")
+        made.write_text(sig, encoding="utf-8")
     rels = public_rels(plan)
-    for c in plan.get("cutouts", []):   # the speaker cut out for behind cards: a folder of PNGs from matte.py
-        if not (edit / c["src"]).is_dir():
-            sys.exit(f"ERROR: {edit / c['src']} missing (run matte.py)")
-        shutil.copytree(edit / c["src"], pub / c["src"], dirs_exist_ok=True, copy_function=lambda a, b: None if (
+    for c in dict.fromkeys(c["src"] for c in plan.get("cutouts", [])):   # the speaker cut out for behind cards: PNGs from matte.py
+        if not (edit / c).is_dir():
+            sys.exit(f"ERROR: {edit / c} missing (run matte.py)")
+        if look:   # the same look as the footage, frame for frame, so the cutout always matches the speaker under it
+            grade_cutouts(edit / c, pub / c, look, mask, plan["fps"])
+            continue
+        shutil.copytree(edit / c, pub / c, dirs_exist_ok=True, copy_function=lambda a, b: None if (
             os.path.exists(b) and os.path.getmtime(b) >= os.path.getmtime(a)) else shutil.copy2(a, b))   # only new frames
     for rel in dict.fromkeys(rels):
         src = edit / rel
