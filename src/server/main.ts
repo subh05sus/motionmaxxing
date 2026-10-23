@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createReadStream, createWriteStream, existsSync, readFileSync, rmSync, statSync, watch, writeFileSync, mkdirSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, readFileSync, readdirSync, rmSync, statSync, watch, writeFileSync, mkdirSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
@@ -129,15 +129,26 @@ function cutPrompt(id: string, extra: { instructions?: string; script?: string }
   ].join("\n");
 }
 
+/** The owner's own measured style: the creator teardown whose style.json says "owner": true (library.py own-style). */
+function ownStyle(): string | null {
+  const root = path.join(LIBRARY, "creator-teardowns");
+  try {
+    for (const h of readdirSync(root).sort()) {
+      try { if (JSON.parse(readFileSync(path.join(root, h, "style.json"), "utf8")).owner === true) return h; } catch { /* not a style */ }
+    }
+  } catch { /* no teardowns yet */ }
+  return null;
+}
+
 function editPrompt(id: string): string {
   const d = lib.editDir(id);
-  const own = existsSync(path.join(LIBRARY, "creator-teardowns", "own", "style.json"));
+  const own = ownStyle();
   return [
     "The user approved the cut in the motionmaxxing studio. Make the edit with the motionmaxxing edit skill (load it with",
     "the Skill tool: motionmaxxing:edit) and follow it through step 8, with these settled:",
     "",
     `- Edit folder: ${d} (cut.mp4, words.json and cut.transcript.json are there)`,
-    own ? `- The style: the owner's own measured style, ${path.join(LIBRARY, "creator-teardowns", "own", "style.json")} (copy it to style.json), unless the chat named another.`
+    own ? `- The style: the owner's own measured style, ${path.join(LIBRARY, "creator-teardowns", own, "style.json")} (copy it to style.json), unless the chat named another.`
         : "- The style: step 1 of the skill picks it.",
     "- The video is German: captions keep the user's words exactly (only spelling fixes with retakes.py fix).",
     "- Pick the placement per beat and mix them: background (you cut out in front of the visual), half the screen,",

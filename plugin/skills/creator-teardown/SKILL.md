@@ -141,6 +141,8 @@ Run them after `transcribe` (`look.py` matches OCR text to the spoken words).
 `${CLAUDE_SKILL_DIR}/references/look-pass.md`. Numbers in `style.json` come from code; never edit them
 by hand. Where `look.md` and the model's words disagree (say `motion: punchy` measured, `smooth`
 named), the measured one wins and the teardown says both.
+A teardown of the user's own account is their style: add `"owner": true` to its `style.json` (the one key set by
+hand), and the edit uses it by default.
 
 **No Gemini key** (`gemini.py look` exits 2): offer the free key once (`references/setup.md` step 4).
 If the user skips it, run the fallback: one Agent call with `model: "haiku"` that reads

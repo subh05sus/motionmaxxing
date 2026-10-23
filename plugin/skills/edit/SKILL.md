@@ -49,8 +49,8 @@ Follow every taste rule; the scripts read the settings themselves. When the user
 - **The style** (`edits/<name>/style.json`): Claude picks it per video, never asks. In order:
   1. what the user named ("like the Card edit sample", a creator they had measured): copy that
      `creator-teardowns/<handle>/style.json` to `edits/<name>/style.json`;
-  2. else the owner's own measured style when it exists (`creator-teardowns/own/style.json`, measured from his
-     posted reels): copy it;
+  2. else the owner's own measured style when there is one (`python3 "${CLAUDE_PLUGIN_ROOT}/lib/mm/library.py"
+     own-style` prints its handle: the teardown of their own posted reels, its style.json says `"owner": true`): copy it;
   3. else `python3 "${CLAUDE_PLUGIN_ROOT}/lib/mm/profile.py" style edits/<name>` (the default style).
   Say the style in one line ("In your own style: one-word captions, a punch-in about every 6 s").
 - **The user's images and b-roll:** everything they hand over goes in `edits/<name>/images/` and `images.json`:

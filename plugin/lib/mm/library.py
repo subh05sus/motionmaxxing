@@ -6,6 +6,7 @@
     python3 library.py record <edit dir>    list an edit folder made somewhere else (review.py start does this)
     python3 library.py list                 every video, newest first, as JSON
     python3 library.py recordings           every demo recording (its page, what it shows, the video it was made for)
+    python3 library.py own-style            the handle of the owner's own measured style ("owner": true in its style.json)
     python3 library.py clean [--yes]        the working files that can go and their size; --yes deletes them
     python3 library.py demo                 self-check
 
@@ -187,6 +188,12 @@ def styles(lib=None):
         except (OSError, ValueError):
             pass
     return out
+
+
+def own_style(lib=None):
+    """The handle of the owner's own measured style: the creator teardown whose style.json says "owner": true (a
+    teardown of the owner's own reels), or None."""
+    return next((h for h, s in styles(lib) if s.get("owner") is True), None)
 
 
 def recordings(lib=None):
@@ -381,6 +388,12 @@ def demo():
     set_path(tmp / "lib2")
     assert path() == (tmp / "lib2").resolve(), "set is remembered"
     set_path(lib)
+    # the owner's own style is the teardown that says so, whatever its handle
+    assert own_style(lib) is None
+    (lib / "creator-teardowns" / "me-on-tiktok").mkdir(parents=True)
+    (lib / "creator-teardowns" / "me-on-tiktok" / "style.json").write_text(json.dumps({"owner": True}), encoding="utf-8")
+    assert own_style(lib) == "me-on-tiktok", own_style(lib)
+    shutil.rmtree(lib / "creator-teardowns" / "me-on-tiktok")
     # demo recordings: a finished one is listed with its brief, one with no video yet is not
     for n, brief, vid in (("site", {"title": "Site", "url": "https://x.test", "show": "the hero", "for": "take"}, True),
                           ("bare", None, True), ("unfinished", {"title": "Later"}, False)):
@@ -476,6 +489,8 @@ def main():
         return record(a[1])
     if a[:1] == ["list"]:
         return print(json.dumps(entries(), indent=1))
+    if a[:1] == ["own-style"]:
+        return print(own_style() or "")
     if a[:1] == ["recordings"]:
         return print(json.dumps(recordings(), indent=1, ensure_ascii=False))
     if a[:1] == ["clean"]:
