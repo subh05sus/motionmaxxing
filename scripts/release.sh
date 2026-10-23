@@ -3,12 +3,16 @@
 # `brew upgrade motionmaxxing` brings it to everyone who installed with brew install subh05sus/tap/motionmaxxing.
 #
 #   scripts/release.sh 0.2.0
+#   RELEASE_TRAILER="Co-Authored-By: ..." scripts/release.sh 0.2.0   # lines to end both commit messages with
 set -euo pipefail
 V="${1:?usage: scripts/release.sh X.Y.Z}"
 REPO="subh05sus/motionmaxxing"
 TAP_REPO="subh05sus/homebrew-tap"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+MSG="motionmaxxing $V${RELEASE_TRAILER:+
+
+$RELEASE_TRAILER}"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "Commit your changes first." >&2; exit 1; }
 git fetch -q origin
 [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || { echo "Push main first: a release is what GitHub has." >&2; exit 1; }
@@ -17,7 +21,7 @@ git fetch -q origin
 if [ "$(sed -n 's/^  "version": "\(.*\)",$/\1/p' package.json | head -1)" != "$V" ]; then
   npm version "$V" --no-git-tag-version >/dev/null
   sed -i '' -E "s/\"version\": \"[^\"]+\"/\"version\": \"$V\"/" plugin/.claude-plugin/plugin.json
-  git commit -qam "motionmaxxing $V"
+  git commit -qam "$MSG"
   git push -q origin main
 fi
 git tag -a "v$V" -m "motionmaxxing $V"
@@ -28,7 +32,7 @@ SHA="$(curl -fsSL "$URL" | shasum -a 256 | cut -d' ' -f1)"
 TAP="$(mktemp -d)/tap"
 gh repo clone "$TAP_REPO" "$TAP" -- -q
 sed -i '' -e "s|^  url \".*\"|  url \"$URL\"|" -e "s|^  sha256 \".*\"|  sha256 \"$SHA\"|" "$TAP/Formula/motionmaxxing.rb"
-git -C "$TAP" commit -qam "motionmaxxing $V"
+git -C "$TAP" commit -qam "$MSG"
 git -C "$TAP" push -q
 rm -rf "$(dirname "$TAP")"
 echo "Released $V. Installed copies update with: brew upgrade motionmaxxing"
