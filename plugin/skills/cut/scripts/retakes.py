@@ -495,10 +495,30 @@ def romanize_words(ws):
     return ws
 
 
-def caption_words(heard, cut, names=(), fixes=None, roman=False):
+def script_spellings(text, roman=True):
+    """{sound key: the spelling a Hindi or Hinglish script uses} for its words in Roman letters (roman) or Devanagari,
+    where one spelling owns the sound: "toh" and English "to" share one, so neither is taken. A word the script writes
+    lower case somewhere is lower case (a sentence's capital is the sentence's); a name keeps its capitals."""
+    forms = {}
+    for i, w in enumerate(re.findall(rf"[{lang.WCH}][{lang.WCH}'’-]*", hindi.clean(text))):
+        if hindi.has_deva(w) == roman or (roman and not re.search(r"[A-Za-z]", w)):
+            continue
+        k = hindi.key(w)
+        if len(k) >= 2:
+            forms.setdefault(k, set()).add(w)
+    out = {}
+    for k, ws in forms.items():
+        if len({w.lower() for w in ws}) == 1:
+            low = [w for w in ws if w == w.lower()]
+            out[k] = low[0] if low else sorted(ws)[0]
+    return out
+
+
+def caption_words(heard, cut, names=(), fixes=None, roman=False, script=None):
     """heard: cut.transcript.json words; cut: words.json (the approved cut text, timed on the cut). The heard
     words and times, each word heard differently at the same time spelled as the cut has it, in Roman letters for
-    Hinglish (roman), then the fixes and the profile's name spellings. Returns (words, [(was, now)])."""
+    Hinglish (roman), as the script spells it where it says the same word (script: script_spellings), then the fixes
+    and the profile's name spellings. Returns (words, [(was, now)])."""
     strip = lambda t: re.sub(rf"^[^{lang.WCH}]+|[^{lang.WCH}]+$", "", t)  # noqa: E731 (\\W would take a vowel sign)
     hw = [dict(w) for w in heard if w.get("type", "word") == "word" and norm(w["text"])]
     cw = [w for w in cut if w.get("type", "word") == "word" and norm(w["text"])]
@@ -521,6 +541,12 @@ def caption_words(heard, cut, names=(), fixes=None, roman=False):
         hw[j]["text"] = hw[j]["text"].replace(core, new, 1) if core and ws else new
     if roman:
         romanize_words(hw)
+    for w in hw if script else ():
+        core = strip(w["text"])
+        new = script.get(hindi.key(core)) if core else None
+        if new and new != core:
+            new = new[0].upper() + new[1:] if core[:1].isupper() and new[:1].islower() else new
+            w["text"] = w["text"].replace(core, new, 1)
     spell = {n.lower(): n for n in names}
     for w in hw:
         for old, new in (fixes or {}).items():
@@ -538,9 +564,12 @@ def captions(d):
     cut = load_words(d / "words.json") if (d / "words.json").exists() else []
     fj = d / "fixes.json"
     names = [n["name"] for n in profile.load().get("names") or [] if isinstance(n, dict) and n.get("name")]
-    roman = lang.pack(lang.of(d)).code == "hinglish" and lang.pack(lang.of(d)).script == "latn"
+    P = lang.pack(lang.of(d))
+    roman = P.code == "hinglish" and P.script == "latn"
+    sp = d / "script.md"   # the studio writes the user's script here: a Hindi or Hinglish one spells the captions
+    script = script_spellings(sp.read_text(encoding="utf-8"), roman) if P.numbers == "hi" and sp.exists() else None
     words, changed = caption_words(heard, cut, names, json.loads(fj.read_text(encoding="utf-8")) if fj.exists() else {},
-                                   roman)
+                                   roman, script)
     (d / "captions.json").write_text(json.dumps(words, indent=1, ensure_ascii=False), encoding="utf-8")
     (d / "captions.txt").write_text(text_view(words, "captions", "A misheard word: retakes.py fix <edit_dir> old=new."), encoding="utf-8")
     return words, changed

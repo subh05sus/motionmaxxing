@@ -66,6 +66,11 @@ MAX_KEYTERMS, MAX_KEYTERM_CHARS, PROMPT_TERMS = 100, 49, 40
 CACHE_DAYS = 7
 LOCK_STALE_S = 1800   # a --pre that died without removing its lock
 BRACKETED = re.compile(r"^[\[(\*].*[\])\*]$")   # "[Musik]", "(lacht)", "*hustet*": a sound, not a word
+# Whisper looping on a sound or a silence: one short unit six times and more inside a word ("अवावावावा...", 200
+# letters as one word, whose length passed for speech), or the same word six times running ("Oh, oh, oh, ..."). A sound,
+# never words: the cut does not keep it for speech and the captions never show it.
+LOOP = re.compile(r"(.{1,4}?)\1{5,}")   # a run of it filling 70% of the word: "अ" then "वा" forty times
+LOOP_RUN = 6
 
 
 def clean_keyterms(terms):
@@ -147,7 +152,7 @@ def cpp_words(payload):
                 words[-1]["end"] = round(max(words[-1]["end"], b), 3)
             fresh = False
     out = []
-    for w in words:
+    for w in loops(words):
         if BRACKETED.match(w["text"]):
             w["type"] = "audio_event"
         if w["end"] < w["start"]:
@@ -157,6 +162,23 @@ def cpp_words(payload):
             continue
         out.append(w)
     return out
+
+
+def loops(words):
+    """words with Whisper's loops (LOOP) made audio events, text and times kept."""
+    key = lambda w: re.sub(rf"[^{L.WCH}]|_", "", w["text"].lower())   # noqa: E731
+    i = 0
+    while i < len(words):
+        j = i
+        while j + 1 < len(words) and key(words[j + 1]) and key(words[j + 1]) == key(words[i]):
+            j += 1
+        if j - i + 1 >= LOOP_RUN:
+            for w in words[i:j + 1]:
+                w["type"] = "audio_event"
+        elif len(key(words[i])) >= 12 and (m := LOOP.search(key(words[i]))) and len(m.group(0)) >= 0.7 * len(key(words[i])):
+            words[i]["type"] = "audio_event"
+        i = j + 1
+    return words
 
 
 CHUNK_S, OVERLAP_S = 30.0, 4.0   # whisper.cpp hears a take in 30 s windows that overlap by 4 s
@@ -529,7 +551,8 @@ def cache_dir():
     return HOME / "cache" / "transcripts"
 
 
-WORDS_VERSION = 3   # bumped when the same settings give other words: 2 Hindi's prompt and DTW times, 3 soft edges
+WORDS_VERSION = 4   # bumped when the same settings give other words: 2 Hindi's prompt and DTW times, 3 soft edges,
+#                     4 Whisper's loops as sounds
 
 
 def cache_key(media, engine, code, terms):
@@ -937,6 +960,10 @@ def main():
 # --- self-check -------------------------------------------------------------------------------------------------
 
 def demo():
+    W = lambda t: {"text": t, "start": 0.0, "end": 0.5, "type": "word"}   # noqa: E731
+    got = loops([W("आपके"), W("अवा" + "वा" * 40), W("Oh,")] + [W("oh,") for _ in range(7)] + [W("no"), W("no"), W("no")])
+    assert [w["type"] for w in got] == ["word", "audio_event"] + ["audio_event"] * 8 + ["word"] * 3, got
+    assert loops([W("hahahahahahahaha")])[0]["type"] == "audio_event" and loops([W("Mississippi")])[0]["type"] == "word"
     global HOME
     old = HOME
     with tempfile.TemporaryDirectory() as t:

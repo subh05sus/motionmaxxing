@@ -193,6 +193,13 @@ def test_hinglish_captions_are_in_roman_letters():
         words, _ = R.caption_words(heard, cut, fixes={"Laatap": "Laptop"}, roman=True)
         assert "Laptop ki" in " ".join(x["text"] for x in words), words
         assert R.swap("का काम क।", "क", "ख") == "का काम ख।"     # a vowel sign is inside the word: only the lone क
+        # the user's Hinglish script spells the captions where it says the same word (jayega, not jaayega); "to" and
+        # "toh" share a sound, so neither is taken; a sentence's capital stays
+        sp = R.script_spellings("Toh maine pure 2 ghante laga ke padhi. Seeshe ka ghar ban jayega. Send it to you.")
+        assert sp[R.hindi.key("jayega")] == "jayega" and R.hindi.key("toh") not in sp, sp
+        heard2 = [w("घर", 0.0, 0.3), w("बन", 0.35, 0.5), w("जाएगा।", 0.5, 0.9), w("पढ़ी", 1.0, 1.3)]
+        words, _ = R.caption_words(heard2, heard2, roman=True, script=sp)
+        assert " ".join(x["text"] for x in words) == "Ghar ban jayega. Padhi", words
         assert R.swap("लाटाप,", "लाटाप", "लैपटॉप") == "लैपटॉप,"
     finally:
         R.use_lang("en")

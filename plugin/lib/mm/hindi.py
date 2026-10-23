@@ -25,8 +25,9 @@ CONS = {"क": "k", "ख": "kh", "ग": "g", "घ": "gh", "ङ": "n", "च": "ch
         "ट": "t", "ठ": "th", "ड": "d", "ढ": "dh", "ण": "n", "त": "t", "थ": "th", "द": "d", "ध": "dh", "न": "n",
         "प": "p", "फ": "ph", "ब": "b", "भ": "bh", "म": "m", "य": "y", "र": "r", "ल": "l", "ळ": "l", "व": "v",
         "श": "sh", "ष": "sh", "स": "s", "ह": "h"}
-# a nukta under a consonant: the Persian and English sounds (क़ q, ख़ kh, ग़ g, ज़ z, ड़ r, ढ़ rh, फ़ f)
-NUKTA_CONS = {"क": "q", "ख": "kh", "ग": "g", "ज": "z", "ड": "r", "ढ": "rh", "फ": "f", "य": "y"}
+# a nukta under a consonant: the Persian and English sounds (क़ q, ख़ kh, ग़ g, ज़ z, फ़ f), and ड़ ढ़ as Hinglish writes
+# them, d and dh (kapde, padhi, ladka; "r" read as kapre, parhi)
+NUKTA_CONS = {"क": "q", "ख": "kh", "ग": "g", "ज": "z", "ड": "d", "ढ": "dh", "फ": "f", "य": "y"}
 VOWELS = {"अ": "a", "आ": "aa", "इ": "i", "ई": "ee", "उ": "u", "ऊ": "oo", "ऋ": "ri", "ए": "e", "ऐ": "ai", "ओ": "o",
           "औ": "au", "ऑ": "o", "ऍ": "e", "ॲ": "e"}
 SIGNS = {"ा": "aa", "ि": "i", "ी": "ee", "ु": "u", "ू": "oo", "ृ": "ri", "े": "e",
@@ -192,7 +193,9 @@ def romanize_word(w):
             syll += 1
         elif kind == "n":
             nxt = next((ak[j][1] for j in range(k + 1, n) if ak[j][0] == "c"), "")
-            out.append("m" if nxt[:1] in ("p", "b", "m") and nxt != "ph" else "n")
+            # before n or m the nasal is that letter's own (मैंने maine, not mainne)
+            out.append("" if nxt[:1] in ("n", "m") and k + 1 < n and ak[k + 1][0] == "c"
+                       else "m" if nxt[:1] in ("p", "b") and nxt != "ph" else "n")
         elif kind == "h":
             out.append("h")
         else:
@@ -207,7 +210,7 @@ def romanize(text):
     return " ".join(romanize_word(w) for w in clean(text).split(" "))
 
 
-FOLD = [(r"ph", "f"), (r"w", "v"), (r"z", "j"), (r"q", "k"), (r"x", "ks"), (r"ck", "k"), (r"c(?!h)", "k"),
+FOLD = [(r"rh", "dh"), (r"ph", "f"), (r"w", "v"), (r"z", "j"), (r"q", "k"), (r"x", "ks"), (r"ck", "k"), (r"c(?!h)", "k"),
         (r"aa+", "a"), (r"ee+|ii+", "i"), (r"oo+|uu+", "u"), (r"ei", "e"), (r"ou", "o"),
         (r"(?<=[aeiou])y(?=[aeiou])", ""), (r"(?<=[aeiou])h$", ""), (r"(?<=[aeiou])n$", ""), (r"(.)\1+", r"\1")]
 
