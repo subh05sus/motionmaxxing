@@ -30,6 +30,7 @@ Writes <edit_dir>/cut.transcript.json (reused while it is newer than cut.mp4). E
 """
 import argparse
 import json
+import re
 import os
 import subprocess
 import sys
@@ -110,16 +111,65 @@ def main():
 
     ft = d / "cut.transcript.json"
     fresh = ft.exists() and ft.stat().st_mtime > (d / "cut.mp4").stat().st_mtime
+    # in the edit's language: heard from its own opening, a Hinglish cut that opens in English came back English
     r = subprocess.CompletedProcess([], 0) if fresh else subprocess.run([sys.executable, str(HERE / "transcribe.py"), str(d / "cut.mp4"), str(ft),
-                        "--engine", a.engine], env={**os.environ, "MM_NO_PROGRESS": "1"})   # not the take's steps again
+                        "--engine", a.engine, "--lang", lang.of(d)], env={**os.environ, "MM_NO_PROGRESS": "1"})   # not the take's steps again
     if r.returncode:
         sys.exit(1)
     act = timed_words(load_words(ft))
     actual = [t for t, _, _ in act]
-    rc = report(d, expected, actual, removed, *pair_by_time(exp, act), act=act, spans=spans, raw=raw)
+    same, differ, gone, new = pair_by_time(exp, act)
+    gone, back = relisten(d, exp, gone) if a.engine in ("auto", "whispercpp") else (gone, [])
+    if back:
+        print(f"heard again with their stretch alone ({len(back)}): {' '.join(back[:20])}")
+    rc = report(d, expected, actual, removed, same, differ, gone, new, act=act, spans=spans, raw=raw)
     import splice_check   # joins inside loud speech, measured on the source: `splice_check.py <edit_dir> --fix`
     splice_check.check(d)
     return rc
+
+
+LOOSE = str.maketrans("bgdvz", "pktfs")
+
+
+def loose(t):
+    """A token as a sound heard twice may come back: voiced and unvoiced alike (buri / puri, glas / klas), no breath
+    after a consonant (ghante / gante). Only for relisten: a word that is there, not the first pass's spelling."""
+    return re.sub(r"(?<=[^aeiou])h", "", t).translate(LOOSE)
+
+
+def relisten(d, exp, gone, pad=0.6):
+    """Missing words heard again with their stretch of the cut on its own: Whisper hearing a whole cut skips words a
+    stretch alone gives back (a real Hinglish cut's closing line, "Comment GLASS and I'll send it to you", came back
+    missing, every word there by ear). All the stretches in one whisper.cpp run, in the edit's language.
+    -> (the indices still missing, the words heard again)."""
+    if not gone or not (d / "cut.mp4").exists():
+        return gone, []
+    import tempfile
+    import transcribe as T
+    runs = []
+    for i in sorted(gone):
+        if runs and i == runs[-1][-1] + 1:
+            runs[-1].append(i)
+        else:
+            runs.append([i])
+    code = lang.of(d)
+    still, back = [], []
+    try:
+        with tempfile.TemporaryDirectory() as t:
+            wav = Path(t) / "cut.wav"
+            T.extract_audio(d / "cut.mp4", wav)
+            parts = []
+            for k, run in enumerate(runs):
+                a = max(0.0, exp[run[0]][1] - pad)
+                parts.append(Path(t) / f"{k}.wav")
+                T.cut_wav(wav, a, exp[run[-1]][2] + pad - a, parts[-1])
+            heard = [{loose(x[0]) for x in timed_words(T.cpp_words(p))} for p in T.cpp_files(parts, code, T.prompt_for(code, []))]
+    except (SystemExit, Exception):   # noqa: BLE001  no model, no audio: the words stay missing, as before
+        return gone, []
+    for run, got in zip(runs, heard):
+        for i in run:
+            (back if loose(exp[i][0]) in got else still).append(i)
+    return still, [exp[i][0] for i in back]
 
 
 def heard_as_line(d, toks, sa, sb):
@@ -245,6 +295,8 @@ def demo():
         {"start": 5.05, "end": 5.35, "kind": "retake", "confidence": "high", "evidence": "and"}]}), encoding="utf-8")
     spans = [{"start": 0.0, "end": 2.0}, {"start": 5.0, "end": 8.0}]
     assert to_source(1.0, spans) == 1.0 and to_source(2.5, spans) == 5.5 and to_source(9, spans) == 8.0
+    assert loose("buri") == loose("puri") and loose("glas") == loose("klas") and loose("ghante") == loose("gante")
+    assert loose("hai") != loose("ha") and relisten(d, [], []) == ([], [])
     raw = [{"text": t, "start": s, "end": s + 0.3, "type": "word"} for t, s in
            (("less", 0.8), ("than", 1.2), ("cents", 1.6), ("and", 4.6), ("and", 5.05), ("to", 5.4))]
     act = [("less", 0.8, 1.1), ("than", 1.2, 1.5), ("cents", 1.6, 1.9), ("and", 2.0, 2.2), ("and", 2.05, 2.35),

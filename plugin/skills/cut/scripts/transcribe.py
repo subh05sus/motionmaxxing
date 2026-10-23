@@ -318,6 +318,24 @@ def snap(words, audio):
     return ws
 
 
+def language_for(asked, out=None, script=None):
+    """The language to hear a take in, before it is heard: the one asked for (--lang, MM_LANG), else the one the user
+    picked in the studio (meta.json lang_asked), else the edit's own once decided (meta.json lang: the verify pass
+    hearing cut.mp4 took the cut's English opening for the whole video, wrote "en" over a Hinglish edit, and the heal
+    after it translated the Hindi), else what a Hindi or Hinglish script says, else "auto" (heard)."""
+    if asked != "auto":
+        return asked
+    edit = Path(out).parent if out else None
+    got = L.asked(edit) if edit else None
+    if not got and edit and L.get_meta(edit).get("lang"):
+        got = L.pack(L.get_meta(edit)["lang"]).code
+    if not got and script:   # a script in Hindi or Hinglish says so better than the take's opening
+        got = L.script_language(Path(script).read_text(encoding="utf-8"))
+        if got:
+            print(f"language   {got} (the script)", flush=True)
+    return got or "auto"
+
+
 def decide(asked, heard, words):
     """The edit's language: the one asked for, else the one Whisper heard. Heard Hindi is Hinglish when English
     words in Latin letters make a share of it (lang.LATIN_SHARE_HINGLISH): its captions are then in Roman letters."""
@@ -941,13 +959,7 @@ def main():
     if not a.pre:
         progress.step("Writing down every word", key=Path(a.out).parent)
     engine = pick_engine(a.engine)
-    code = a.lang.lower()
-    if code == "auto" and a.out:      # the language the user picked in the studio, before the take was heard
-        code = L.asked(Path(a.out).parent) or "auto"
-    if code == "auto" and a.script:   # a script in Hindi or Hinglish says so better than the take's opening
-        code = L.script_language(Path(a.script).read_text(encoding="utf-8")) or "auto"
-        if code != "auto":
-            print(f"language   {code} (the script)", flush=True)
+    code = language_for(a.lang.lower(), a.out, a.script)
     script_terms = L.keyterms(Path(a.script).read_text(encoding="utf-8"), None if code == "auto" else code) \
         if a.script else []
     terms = clean_keyterms(a.keyterm + script_terms)
@@ -987,6 +999,16 @@ def main():
 # --- self-check -------------------------------------------------------------------------------------------------
 
 def demo():
+    with tempfile.TemporaryDirectory() as t:   # the language before a take is heard
+        e = Path(t) / "edit"
+        assert language_for("de", e / "words.raw.json") == "de" and language_for("auto", e / "words.raw.json") == "auto"
+        L.set_meta(e, lang="hinglish", heard="hi")
+        assert language_for("auto", e / "cut.transcript.json") == "hinglish"   # verify hears the cut in the edit's language
+        L.set_meta(e, lang_asked="hi")
+        assert language_for("auto", e / "cut.transcript.json") == "hi"         # the user's pick wins
+        (Path(t) / "s.md").write_text("Toh maine pure 2 ghante laga ke Apple ki guidelines padhi. Taaki tumhe docs na "
+                                      "padhna padhe, aur sabko pata hai", encoding="utf-8")
+        assert language_for("auto", Path(t) / "new" / "words.raw.json", Path(t) / "s.md") == "hinglish"
     W = lambda t: {"text": t, "start": 0.0, "end": 0.5, "type": "word"}   # noqa: E731
     got = loops([W("आपके"), W("अवा" + "वा" * 40), W("Oh,")] + [W("oh,") for _ in range(7)] + [W("no"), W("no"), W("no")])
     assert [w["type"] for w in got] == ["word", "audio_event"] + ["audio_event"] * 8 + ["word"] * 3, got
