@@ -5,6 +5,7 @@ import { GlassSegmented } from "@/components/ui/glass-segmented";
 import type { Clip, VideoSummary } from "@/components/video-card";
 import { api, useApi, useEvents } from "@/lib/api";
 import { LANG_OPTIONS, type LangChoice } from "@/lib/langs";
+import { useProfiles } from "@/lib/profiles";
 import { navigate, useRoute } from "@/lib/router";
 import { toast } from "@/lib/toast";
 import { droppedVideos, isVideo, uploadClips, useUploads, type Upload } from "@/lib/uploads";
@@ -24,11 +25,17 @@ export function NewVideoPage({ setTitle }: PageProps) {
   const [busy, setBusy] = useState(false);
   const [script, setScript] = useState("");
   const [notes, setNotes] = useState("");
-  // the last language picked comes back: a creator mostly records in one
-  const [lang, setLang] = useState<LangChoice>(() => {
-    try { const v = localStorage.getItem("mm.lang"); return LANG_OPTIONS.some((o) => o.value === v) ? (v as LangChoice) : "auto"; } catch { return "auto"; }
-  });
-  const pickLang = (v: LangChoice) => { setLang(v); try { localStorage.setItem("mm.lang", v); } catch { /* private window */ } };
+  // the profile's language (its settings), else the last one picked in this profile: a creator mostly records in one
+  const { current } = useProfiles();
+  const langKey = `mm.lang${current ? `.${current.id}` : ""}`;
+  const [lang, setLang] = useState<LangChoice>("auto");
+  useEffect(() => {
+    const ok = (v: unknown): v is LangChoice => LANG_OPTIONS.some((o) => o.value === v);
+    let last: string | null = null;
+    try { last = localStorage.getItem(langKey); } catch { /* private window */ }
+    setLang(ok(current?.lang) ? current.lang : ok(last) ? last : "auto");
+  }, [langKey, current?.lang]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const pickLang = (v: LangChoice) => { setLang(v); try { localStorage.setItem(langKey, v); } catch { /* private window */ } };
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string>();
   const more = useRef<HTMLInputElement>(null);

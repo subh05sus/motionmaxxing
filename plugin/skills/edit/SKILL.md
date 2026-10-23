@@ -17,7 +17,8 @@ An approved cut and a creator's style in. The finished video out: captions, face
 graphics timed to the words, in the creator's look and the user's brand. Claude checks the stills itself (step 5),
 renders on the Mac (step 6), and the studio shows the result; the user's notes come from the studio.
 
-Paths are relative to the library (PRINCIPLES.md). `S="${CLAUDE_SKILL_DIR}/scripts"`,
+Paths are relative to the library (PRINCIPLES.md; with profiles and no `MM_PROFILE`, ask which one first).
+`S="${CLAUDE_SKILL_DIR}/scripts"`,
 `VPY="${CLAUDE_PLUGIN_ROOT}/lib/mm/run.py"`; `python3 "$VPY"` is the venv Python.
 
 ```

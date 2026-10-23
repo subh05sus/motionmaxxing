@@ -5,14 +5,14 @@ import { LIBRARY, slug } from "./paths.js";
 /** Scripts the user pasted to fact-check: <library>/scripts/<id>/ with script.md (theirs), meta.json, and the
  * fact-check skill's claims.md, facts.md (in the script's language) and facts.json (the counts). */
 
-export const SCRIPTS = path.join(LIBRARY, "scripts");
-export const scriptDir = (id: string): string => path.join(SCRIPTS, path.basename(id));
+export const SCRIPTS = (): string => path.join(LIBRARY(), "scripts");   // this profile's
+export const scriptDir = (id: string): string => path.join(SCRIPTS(), path.basename(id));
 interface Meta { title: string; createdAt: string; session?: string }
 const read = (f: string): string | null => { try { return readFileSync(f, "utf8"); } catch { return null; } };
 const mtime = (p: string) => { try { return statSync(p).mtimeMs; } catch { return 0; } };
 
 export function newScript(text: string, title?: string): string {
-  mkdirSync(SCRIPTS, { recursive: true });
+  mkdirSync(SCRIPTS(), { recursive: true });
   const first = text.trim().split(/[.!?।](?=\s|$)|\n/)[0]!.trim();   // । ends a Hindi sentence
   const t = (title?.trim() || (first.length > 60 ? first.slice(0, 60).replace(/\s+\S*$/, "") + "…" : first)) || "Script";
   const base = slug(t);
@@ -65,8 +65,8 @@ export function detail(id: string) {
 }
 
 export function list() {
-  if (!existsSync(SCRIPTS)) return [];
-  return readdirSync(SCRIPTS).filter((n) => !n.startsWith(".") && statSync(path.join(SCRIPTS, n)).isDirectory())
+  if (!existsSync(SCRIPTS())) return [];
+  return readdirSync(SCRIPTS()).filter((n) => !n.startsWith(".") && statSync(path.join(SCRIPTS(), n)).isDirectory())
     .map(summary).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 

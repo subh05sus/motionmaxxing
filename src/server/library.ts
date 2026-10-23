@@ -41,7 +41,7 @@ export interface Word { i: number; text: string; start: number; end: number; kep
 const readJson = <T>(p: string, fallback: T): T => { try { return JSON.parse(readFileSync(p, "utf8")) as T; } catch { return fallback; } };
 const mtime = (p: string) => { try { return statSync(p).mtimeMs; } catch { return 0; } };
 
-export const editDir = (id: string): string => path.join(EDITS, path.basename(id));
+export const editDir = (id: string): string => path.join(EDITS(), path.basename(id));
 
 export function record(id: string): StudioRecord {
   const d = editDir(id);
@@ -71,7 +71,7 @@ export function saveRecord(id: string, r: StudioRecord): void {
 
 /** A new edit folder for a raw take: a unique id from its name. */
 export function newEdit(title: string, source: string): string {
-  mkdirSync(EDITS, { recursive: true });
+  mkdirSync(EDITS(), { recursive: true });
   const base = slug(title || path.basename(source));
   let id = base, n = 2;
   while (existsSync(editDir(id))) id = `${base}-${n++}`;
@@ -158,7 +158,7 @@ function on(p: Proc, d: string, id: string): boolean {
   const rd = real(d);
   if (p.cwd && (p.cwd === rd || p.cwd.startsWith(rd + path.sep))) return true;
   if ([...new Set([d, rd])].some((x) => new RegExp(`${esc(x)}(?=$|[/\\s'"])`).test(p.cmd))) return true;
-  return !!p.cwd && p.cwd === real(LIBRARY) && new RegExp(`(?:^|[\\s'"=])(?:\\./)?edits/${esc(id)}(?=$|[/\\s'"])`).test(p.cmd);
+  return !!p.cwd && p.cwd === real(LIBRARY()) && new RegExp(`(?:^|[\\s'"=])(?:\\./)?edits/${esc(id)}(?=$|[/\\s'"])`).test(p.cmd);
 }
 
 // a running script -> the step to show, and the progress steps that script writes (their detail and bar are its own)
@@ -238,10 +238,10 @@ export function summary(id: string) {
 
 /** The videos in the library (an edit folder with a record, a transcript or a source). */
 export function ids(): string[] {
-  if (!existsSync(EDITS)) return [];
-  return readdirSync(EDITS)
-    .filter((n) => !n.startsWith(".") && statSync(path.join(EDITS, n)).isDirectory())
-    .filter((n) => ["studio.json", "words.raw.json", "source.mp4"].some((f) => existsSync(path.join(EDITS, n, f))));
+  if (!existsSync(EDITS())) return [];
+  return readdirSync(EDITS())
+    .filter((n) => !n.startsWith(".") && statSync(path.join(EDITS(), n)).isDirectory())
+    .filter((n) => ["studio.json", "words.raw.json", "source.mp4"].some((f) => existsSync(path.join(EDITS(), n, f))));
 }
 
 export function list() {

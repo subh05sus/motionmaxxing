@@ -1,9 +1,12 @@
-import { Bell, Check, Globe, KeyRound, Loader2, Moon, Sparkles, Wrench, X } from "lucide-react";
+import { Bell, Check, Globe, KeyRound, Loader2, Moon, Plus, Sparkles, Wrench, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
+import { AddProfile, Avatar } from "@/components/profiles";
 import { GlassSegmented } from "@/components/ui/glass-segmented";
 import { Switch } from "@/components/ui/switch";
 import { alertsOn, askNotifications, chime, setAlerts } from "@/lib/alerts";
 import { api, useApi } from "@/lib/api";
+import { langName } from "@/lib/langs";
+import { switchProfile, useProfiles } from "@/lib/profiles";
 import { Link } from "@/lib/router";
 import type { PageProps } from "@/app";
 
@@ -62,6 +65,29 @@ function KeyRow({ name, has, reload }: { name: keyof typeof STOCK; has: boolean;
   );
 }
 
+/** The library's profiles: one creator each. Pick one to work as it, open its settings, add one. */
+function ProfilesGroup() {
+  const { list, current } = useProfiles();
+  const [adding, setAdding] = useState(false);
+  return (
+    <Group title="Profiles" footer={list.length ? "Each profile has its own videos, styles, scripts, chats and taste. The b-roll, demo recordings and sounds are shared." : "Two creators in one studio: each profile keeps its own videos, styles and chats apart. The first one takes everything already in the library."}>
+      {list.map((p) => (
+        <div key={p.id} className="flex min-h-11 items-center gap-3 px-3 py-1.5">
+          <Avatar p={p} size={26} />
+          <div className="min-w-0 flex-1"><p className="truncate">{p.name}</p><p className="caption">{p.lang ? langName(p.lang) : "Language: Auto"}{Object.keys(p.handles).length ? ` · @${Object.values(p.handles)[0]}` : ""}</p></div>
+          {p.id === current?.id
+            ? <Link href="/profile" className="h-6 rounded-md px-2 leading-6 text-primary hover:bg-primary/10">Edit</Link>
+            : <button onClick={() => void switchProfile(p.id, "/settings")} className="h-6 rounded-md px-2 text-primary hover:bg-primary/10">Switch</button>}
+        </div>
+      ))}
+      <button onClick={() => setAdding(true)} className="flex min-h-11 w-full items-center gap-3 px-3 py-2 text-left text-primary hover:bg-foreground/5">
+        <span className="grid size-[26px] place-items-center rounded-full bg-primary/12"><Plus className="size-3.5" /></span>Add a profile
+      </button>
+      <AddProfile open={adding} onClose={() => setAdding(false)} profiles={list} />
+    </Group>
+  );
+}
+
 /** The recording browser: the sites Claude may drive for demos, and signing in to one (in that browser, never the user's own). */
 function RecorderGroup() {
   const sites = useApi<Record<string, { allowed: string }>>("/api/recorder/sites");
@@ -106,6 +132,7 @@ export function SettingsPage({ setTitle }: PageProps) {
     <div className="h-full overflow-y-auto pb-24 md:pb-0">
       <div className="mx-auto max-w-[560px] space-y-6 px-6 py-8">
         <h1 className="title-1">Settings</h1>
+        <ProfilesGroup />
         <Group title="Appearance">
           <Row icon={<Moon className="size-3.5" />} label="Theme">
             <GlassSegmented value={theme} onChange={(v) => {

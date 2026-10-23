@@ -67,7 +67,7 @@ def own_folder():
     except ImportError:   # run as a script: lib/ is not on the path yet
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         from mm import library as lib
-    return lib.path(make=False) / "broll"
+    return lib.root(make=False) / "broll"   # shared by every profile
 
 
 def libraries():
@@ -210,9 +210,11 @@ def demo():
         stamp = Path(d["sheets"][0]).stat().st_mtime_ns
         assert sheet("t", src, Path(t, "out"))["key"] == d["key"]
         assert Path(d["sheets"][0]).stat().st_mtime_ns == stamp   # unchanged folder: cached
-        # profile, Drive mounts, browse, brief: on a throwaway MM_HOME
-        old = os.environ.get("MM_HOME")
+        # profile, Drive mounts, browse, brief: on a throwaway MM_HOME and library (the real library's own b-roll would
+        # be listed too)
+        old, old_lib = os.environ.get("MM_HOME"), os.environ.get("MM_LIBRARY")
         os.environ["MM_HOME"] = str(Path(t, "home"))
+        os.environ["MM_LIBRARY"] = str(Path(t, "library"))
         try:
             Path(t, "home").mkdir()
             _profile_path().write_text(json.dumps({"platform": "tiktok"}), encoding="utf-8")
@@ -236,11 +238,16 @@ def demo():
             assert [x["name"] for x in json.loads((e / "broll.json").read_text(encoding="utf-8"))["libraries"]] == ["Desk", "Screen"]
             assert (e / "instructions.md").read_text(encoding="utf-8") == "Desk for the intro.\n" and set(got) == {"broll", "instructions"}
             assert slug("Me on camera") == "me-on-camera"
+            own = Path(t, "library", "broll")                         # the library's own b-roll: first, as "library"
+            own.mkdir(parents=True)
+            subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=d=1:s=160x284:r=10", str(own / "x.mp4")], check=True)
+            assert list(libraries())[0] == "library" and libraries()["library"] == str(own.resolve())
         finally:
-            if old is None:
-                os.environ.pop("MM_HOME")
-            else:
-                os.environ["MM_HOME"] = old
+            for k, v in (("MM_HOME", old), ("MM_LIBRARY", old_lib)):
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
     print("broll demo ok")
 
 

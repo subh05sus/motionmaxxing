@@ -53,7 +53,19 @@ import sys
 import tempfile
 from pathlib import Path
 
-HOME = Path(os.environ.get("MM_HOME", Path.home() / ".motionmaxxing"))
+def _home():
+    """Where the cut taste lives: the active profile's folder (each creator's taste and rules are their own), else
+    MM_HOME (no profiles yet, or none picked: main asks which profile before it changes anything)."""
+    base = Path(os.environ.get("MM_HOME", Path.home() / ".motionmaxxing"))
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    try:
+        from mm import library, profiles
+        return profiles.active(library.root(make=False), strict=False)[1] or base
+    except (ImportError, SystemExit):
+        return base
+
+
+HOME = _home()
 SECTIONS = ["Cut", "Captions", "Visuals", "Sound", "Layout"]
 SAME = 0.8   # rules this similar are the same rule said again: replace, don't append
 KEEP_EDITS = 30   # applied_in keeps the last this many edit names
@@ -469,6 +481,9 @@ def issue(yes=False):
 
 def demo():
     global HOME
+    # run as a script this module is __main__; styleskill's `from mm import taste` must see this one (and the HOME
+    # this self-check points at a temp folder), not a second copy reading the real taste
+    sys.modules.setdefault("mm.taste", sys.modules[__name__])
     old_argv = sys.argv
     old_skills = os.environ.get("MM_SKILLS")
     with tempfile.TemporaryDirectory() as d:
@@ -583,6 +598,8 @@ def main():
     flag = lambda k: a[a.index(k) + 1] if k in a and a.index(k) + 1 < len(a) else None
     if cmd == "demo":
         return demo()
+    from mm import library
+    library.path(make=False)   # two or more profiles and none picked: stops with the question (each has its own taste)
     if cmd == "show":
         print(show(flag("--edit")))
     elif cmd == "report":

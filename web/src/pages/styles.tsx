@@ -1,13 +1,17 @@
-import { Brain, Layers, Sparkles } from "lucide-react";
-import { useEffect } from "react";
+import { Brain, Copy, Layers, Loader2, Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Prose } from "@/components/chat";
-import { useApi } from "@/lib/api";
+import { api, useApi } from "@/lib/api";
+import { useProfiles } from "@/lib/profiles";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { SPRING_SNAPPY, staggerDelay } from "@/lib/motion";
 import { motion } from "motion/react";
 import type { PageProps } from "@/app";
 
-interface Style { handle: string; name: string; about?: string; format?: string; aspect?: string; sample: boolean; layout?: string; cover?: string; motion?: { kinds?: Record<string, boolean> }; captions?: { present?: boolean } }
+interface Style { handle: string; name: string; about?: string; format?: string; aspect?: string; sample: boolean; own?: boolean; layout?: string; cover?: string; motion?: { kinds?: Record<string, boolean> }; captions?: { present?: boolean } }
+/** Another profile's style, to copy into this one. */
+interface Other { pid: string; profile: string; handle: string; name: string; about?: string; own: boolean; cover?: string }
 
 const LAYOUT: Record<string, string> = { split: "Half the screen", board: "Full screen canvas", cards: "Cards over you", pip: "Small box", behind: "Behind you", full: "Full screen" };
 
@@ -28,8 +32,17 @@ function LayoutGlyph({ mode, aspect, captions }: { mode?: string; aspect?: strin
 
 /** Styles: the looks an edit can copy (the samples and every creator studied), and the taste learned from the user. */
 export function StylesPage({ setTitle }: PageProps) {
-  const { data } = useApi<{ styles: Style[]; taste: { text: string; settings: Record<string, unknown> } }>("/api/styles");
+  const { data, reload } = useApi<{ styles: Style[]; others?: Other[]; taste: { text: string; settings: Record<string, unknown> } }>("/api/styles");
+  const { current } = useProfiles();
+  const [borrowing, setBorrowing] = useState<string>();
   useEffect(() => { setTitle("Styles"); }, [setTitle]);
+  const mine = new Set((data?.styles ?? []).map((s) => s.handle));
+  const others = (data?.others ?? []).filter((o) => !mine.has(o.handle));
+  const borrow = async (o: Other) => {
+    setBorrowing(`${o.pid}/${o.handle}`);
+    try { await api("/api/styles/borrow", { json: { pid: o.pid, handle: o.handle } }); toast(`“${o.name}” is in your styles now: a copy, so changes stay apart`); reload(); }
+    catch (e) { toast((e as Error).message); } finally { setBorrowing(undefined); }
+  };
   // The learned rules, without the file's title and without the sections nothing was learned for yet.
   const taste = (data?.taste.text ?? "").replace(/^# .*\n+/, "").split(/\n(?=## )/)
     .filter((sec) => !sec.startsWith("## ") || /\n\s*[-*]\s/.test(sec)).join("\n").trim();
@@ -48,7 +61,8 @@ export function StylesPage({ setTitle }: PageProps) {
                 <div className="space-y-1.5 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <h2 className="headline">{s.name}</h2>
-                    {s.sample && <span className="rounded-full bg-foreground/8 px-2 py-0.5 text-[10px] text-muted-foreground">Sample</span>}
+                    {s.own ? <span className="rounded-full bg-primary/12 px-2 py-0.5 text-[10px] text-primary">{current ? `${current.name}’s own` : "Your own"}</span>
+                      : s.sample && <span className="rounded-full bg-foreground/8 px-2 py-0.5 text-[10px] text-muted-foreground">Sample</span>}
                   </div>
                   {s.format && <p className="caption">{s.format}</p>}
                   {s.about && <p className="line-clamp-4 text-[12px] leading-[16px] text-muted-foreground">{s.about}</p>}
@@ -63,8 +77,31 @@ export function StylesPage({ setTitle }: PageProps) {
             {!data && <p className="text-muted-foreground">Loading…</p>}
           </div>
         </section>
+        {others.length > 0 && (
+          <section>
+            <h2 className="mb-1 title-2">From other profiles</h2>
+            <p className="mb-3 label-2">Use one here too: it is copied into {current ? `${current.name}’s` : "these"} styles, so changing it never changes theirs.</p>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {others.map((o) => (
+                <div key={`${o.pid}/${o.handle}`} className="panel flex items-center gap-3 p-2.5">
+                  <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-[8px] bg-card-2">
+                    {o.cover ? <img src={o.cover} alt="" className="size-full object-cover" /> : <Layers className="size-4 text-faint-foreground" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate headline">{o.name}</p>
+                    <p className="truncate caption">{o.own ? `${o.profile}’s own style` : `In ${o.profile}’s styles`}</p>
+                  </div>
+                  <button onClick={() => void borrow(o)} disabled={!!borrowing} title="Copy into these styles"
+                    className="flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-primary hover:bg-primary/10 disabled:opacity-50">
+                    {borrowing === `${o.pid}/${o.handle}` ? <Loader2 className="size-3.5 animate-spin" /> : <Copy className="size-3.5" />}Use
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
         <section>
-          <h2 className="mb-1 flex items-center gap-2 title-2"><Brain className="size-4 text-primary" />Your taste</h2>
+          <h2 className="mb-1 flex items-center gap-2 title-2"><Brain className="size-4 text-primary" />{current ? `${current.name}’s taste` : "Your taste"}</h2>
           <p className="mb-3 label-2">What motionmaxxing learned from your own edits and your notes. Every cut and edit reads it first. Change it by telling Claude.</p>
           <div className="panel p-4">
             {taste ? <Prose text={taste} /> : <p className="flex items-center gap-2 text-muted-foreground"><Sparkles className="size-4" />Nothing learned yet. Give Claude a raw take and your finished edit of it, and it measures how you cut.</p>}

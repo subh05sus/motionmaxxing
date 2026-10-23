@@ -74,10 +74,18 @@ The studio:
   today and suggests fixes in your words.
 - **Library**: your b-roll (rename it, delete it, add more; every edit can use it), what each video takes up, and
   Recently deleted.
+- **Profiles**: two creators in one studio, each with their own videos, raw takes, styles, scripts, Claude chats,
+  learned taste and settings (language, brand kit, names and terms, the usual call to action, an export folder). The
+  b-roll, demo recordings, sample styles and sounds are shared, and a style can be copied from another profile. The
+  first time a browser opens the studio it asks "Who's editing?"; after that, switch in the sidebar. Add a profile's
+  accounts and its own style is measured from them in the background, then again each week as a proposal you approve.
+  An approved edit lands in the profile's export folder. The first profile takes everything already in the library
+  (undo: `python3 plugin/lib/mm/profiles.py undo <log>`), and a video can move to another profile from its menu.
 - **Styles**, **Settings**. ⌘K finds anything, ⌘B folds the sidebar, ⌘/ shows or hides Claude.
 - On a phone: watch, leave notes and approve.
 
-Everything stays on the Mac, in `~/Movies/motionmaxxing`.
+Everything stays on the Mac, in `~/Movies/motionmaxxing` (one folder per profile). Outside the studio, the skills ask
+which profile a command is for and run it with `MM_PROFILE=<id>`.
 
 ## Status
 

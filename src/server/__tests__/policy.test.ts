@@ -7,14 +7,14 @@ import { LIBRARY, REPO, inside, slug } from "../paths.js";
 
 describe("what Claude may do without asking", () => {
   it("runs the studio's own tools freely", () => {
-    expect(needsPermission("Read", { file_path: path.join(LIBRARY, "edits", "a", "spans.json") })).toBeNull();
-    expect(needsPermission("Write", { file_path: path.join(LIBRARY, "edits", "a", "spans.json") })).toBeNull();
+    expect(needsPermission("Read", { file_path: path.join(LIBRARY(), "edits", "a", "spans.json") })).toBeNull();
+    expect(needsPermission("Write", { file_path: path.join(LIBRARY(), "edits", "a", "spans.json") })).toBeNull();
     expect(needsPermission("Bash", { command: `python3 ${REPO}/plugin/skills/cut/scripts/render.py src edits/a` })).toBeNull();
     expect(needsPermission("AskUserQuestion", {})).toBeNull();
   });
   it("reads a path the way the shell does", () => {
-    expect(needsPermission("Bash", { command: `cd ${LIBRARY}; ls -la edits/a` })).toBeNull();
-    expect(needsPermission("Bash", { command: `(cd ${LIBRARY} && python3 x.py)` })).toBeNull();
+    expect(needsPermission("Bash", { command: `cd ${LIBRARY()}; ls -la edits/a` })).toBeNull();
+    expect(needsPermission("Bash", { command: `(cd ${LIBRARY()} && python3 x.py)` })).toBeNull();
     expect(needsPermission("Bash", { command: `cd ${path.join(os.homedir(), "Documents")}; ls` })).toMatch(/outside/);
   });
   it("asks for writes outside the studio's folders", () => {
@@ -30,7 +30,7 @@ describe("what Claude may do without asking", () => {
     expect(needsPermission("mcp__claude-in-chrome__navigate", { url: "https://claude.ai" })).toMatch(/connected service/);
   });
   it("knows its folders", () => {
-    expect(inside(path.join(LIBRARY, "edits"))).toBe(true);
+    expect(inside(path.join(LIBRARY(), "edits"))).toBe(true);
     expect(inside(path.join(os.homedir(), "Desktop"))).toBe(false);
   });
 });

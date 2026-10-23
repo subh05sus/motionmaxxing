@@ -39,7 +39,7 @@ from mm import taste  # noqa: E402
 
 MINE = "my-style"
 OVERRIDES = "style.overrides.json"
-HOME = Path(os.environ.get("MM_HOME", Path.home() / ".motionmaxxing"))   # the real taste folder
+HOME = taste.HOME   # the real taste folder (the active profile's, or MM_HOME without profiles)
 FORMAT_LINE = re.compile(r"Script format: the `([^`]+)` skill")
 
 

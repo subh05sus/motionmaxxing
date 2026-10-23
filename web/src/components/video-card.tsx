@@ -1,4 +1,4 @@
-import { Check, Ellipsis, Film, FolderOpen, Loader2, Pencil, Play, Trash2 } from "lucide-react";
+import { ArrowRightLeft, Check, Ellipsis, Film, FolderOpen, Loader2, Pencil, Play, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
 import { useState } from "react";
 import { Menu } from "@/components/menu";
@@ -34,7 +34,7 @@ export const STATUS: Record<string, { label: string; tone: string }> = {
   approved: { label: "Approved", tone: "text-muted-foreground" },
 };
 
-export interface CardActions { rename: (id: string, title: string) => void; del: (ids: string[], title: string) => void }
+export interface CardActions { rename: (id: string, title: string) => void; del: (ids: string[], title: string) => void; move?: (id: string, title: string) => void }
 
 export function VideoCard({ v, index = 0, actions, selecting, selected, onSelect }: { v: VideoSummary; index?: number; actions?: CardActions;
   selecting?: boolean; selected?: boolean; onSelect?: (on: boolean) => void }) {
@@ -46,6 +46,7 @@ export function VideoCard({ v, index = 0, actions, selecting, selected, onSelect
     { label: "Open", icon: <Play className="size-3.5" />, run: () => navigate(href) },
     { label: "Rename…", icon: <Pencil className="size-3.5" />, run: () => actions.rename(v.id, v.title) },
     { label: "Show in Finder", icon: <FolderOpen className="size-3.5" />, run: () => void api("/api/reveal", { json: { id: v.id } }) },
+    { label: "Move to another profile…", icon: <ArrowRightLeft className="size-3.5" />, hidden: !actions.move, run: () => actions.move?.(v.id, v.title) },
     { label: "Delete…", icon: <Trash2 className="size-3.5" />, danger: true, run: () => actions.del([v.id], v.title) },
   ] : [];
   return (

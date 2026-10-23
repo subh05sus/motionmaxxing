@@ -1,6 +1,7 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import os from "node:os";
 import path from "node:path";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 /** Where everything lives. The code never holds a video: the library does. */
@@ -8,26 +9,62 @@ export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 export const PLUGIN = path.join(REPO, "plugin");
 export const WEB_DIST = path.join(REPO, "web", "dist");
 export const HOME = process.env.MM_HOME || path.join(os.homedir(), ".motionmaxxing");
-export const LIBRARY = process.env.MM_LIBRARY || path.join(os.homedir(), "Movies", "motionmaxxing");
-export const EDITS = path.join(LIBRARY, "edits");
-export const VIDEOS = path.join(LIBRARY, "videos");
-export const RECORDINGS = path.join(LIBRARY, "recordings");
-export const SESSIONS = path.join(HOME, "studio", "sessions");
+/** The library's top: profiles.json, each profile's folder, and what every profile shares. */
+export const ROOT = process.env.MM_LIBRARY || path.join(os.homedir(), "Movies", "motionmaxxing");
+export const RECORDINGS = path.join(ROOT, "recordings");   // shared: a page recorded once shows in any video
+export const BROLL = path.join(ROOT, "broll");             // shared: the library's b-roll
 export const VPY = path.join(HOME, "venv", "bin", "python");
+
+// --- profiles: one creator each, in their own folder of the library (plugin/lib/mm/profiles.py) -------------------
+// A request's profile is its cookie (this device's pick); background work keeps the profile it started in
+// (AsyncLocalStorage). Without profiles the library is used as it always was.
+
+export interface Profile { id: string; name: string; folder: string; color?: string; picture?: string | null; created?: string }
+const store = new AsyncLocalStorage<string | null>();
+const LAST = path.join(HOME, "studio", "profile");   // the profile last picked in the studio on this Mac
+
+export function profiles(): Profile[] {
+  try { const d = JSON.parse(readFileSync(path.join(ROOT, "profiles.json"), "utf8")); return Array.isArray(d.profiles) ? d.profiles : []; }
+  catch { return []; }
+}
+const known = (id: string | null | undefined) => (id ? profiles().find((p) => p.id === id) : undefined);
+
+/** The profile of this request (its cookie) or of the work it started; else the last one picked here; else the only
+ *  one there is; null without profiles. */
+export function profileId(): string | null {
+  const ps = profiles();
+  if (!ps.length) return null;
+  const mine = store.getStore();
+  if (mine !== undefined && known(mine)) return mine;
+  const last = (() => { try { return readFileSync(LAST, "utf8").trim(); } catch { return ""; } })();
+  return known(last)?.id ?? ps[0]!.id;
+}
+export const profile = (): Profile | undefined => known(profileId());
+/** Run fn as this profile (a request, a job, a Claude session): every path below follows it. */
+export const withProfile = <T>(id: string | null, fn: () => T): T => store.run(id, fn);
+export function pickProfile(id: string): void { mkdirSync(path.dirname(LAST), { recursive: true }); writeFileSync(LAST, id); }
+
+/** This profile's folder (its videos, styles, scripts, chats), or the top without profiles. */
+export const LIBRARY = (): string => { const p = profile(); return p ? path.join(ROOT, p.folder) : ROOT; };
+export const EDITS = (): string => path.join(LIBRARY(), "edits");
+export const VIDEOS = (): string => path.join(LIBRARY(), "videos");
+export const SESSIONS = (): string => (profile() ? path.join(LIBRARY(), ".studio", "sessions") : path.join(HOME, "studio", "sessions"));
+/** What a script needs to work in this profile: the library's top and the profile (lib/mm/profiles.py reads them). */
+export const profileEnv = (): Record<string, string> => ({ MM_LIBRARY: ROOT, ...(profileId() ? { MM_PROFILE: profileId()! } : {}) });
 export const PORT = Number(process.env.MM_PORT || 5199);
 
 export const CUT = path.join(PLUGIN, "skills", "cut", "scripts");
 export const SETUP = path.join(PLUGIN, "skills", "setup", "scripts", "setup.py");
 
 export function ensureDirs(): void {
-  for (const d of [EDITS, VIDEOS, RECORDINGS, SESSIONS]) if (!existsSync(d)) mkdirSync(d, { recursive: true });
+  for (const d of [EDITS(), VIDEOS(), RECORDINGS, SESSIONS()]) if (!existsSync(d)) mkdirSync(d, { recursive: true });
 }
 
 /** The engine's Python when setup has made it, else the system one (stdlib scripts run on either). */
 export const python = (): string => (existsSync(VPY) ? VPY : "python3");
 
 /** Folders Claude may read, write and run in without asking. */
-export const ALLOWED_ROOTS = (): string[] => [REPO, LIBRARY, HOME, os.tmpdir(), "/private/tmp", "/tmp"];
+export const ALLOWED_ROOTS = (): string[] => [REPO, ROOT, HOME, os.tmpdir(), "/private/tmp", "/tmp"];
 
 export function inside(p: string, roots = ALLOWED_ROOTS()): boolean {
   const abs = path.resolve(p.replace(/^~(?=$|\/)/, os.homedir()));
@@ -42,7 +79,7 @@ const GERMAN: Record<string, string> = { ä: "ae", ö: "oe", ü: "ue", Ä: "Ae",
 const DEVA_C: Record<string, string> = Object.fromEntries(
   "क k ख kh ग g घ gh ङ n च ch छ chh ज j झ jh ञ n ट t ठ th ड d ढ dh ण n त t थ th द d ध dh न n प p फ ph ब b भ bh म m य y र r ल l ळ l व v श sh ष sh स s ह h"
     .split(" ").reduce<string[][]>((a, x, i) => (i % 2 ? (a[a.length - 1]!.push(x), a) : [...a, [x]]), []));
-const DEVA_NUKTA: Record<string, string> = { क: "q", ख: "kh", ग: "g", ज: "z", ड: "r", ढ: "rh", फ: "f", य: "y" };
+const DEVA_NUKTA: Record<string, string> = { क: "q", ख: "kh", ग: "g", ज: "z", ड: "d", ढ: "dh", फ: "f", य: "y" };   // ड़ ढ़ as Hinglish writes them (hindi.py)
 const DEVA_VOWEL: Record<string, string> = { अ: "a", आ: "aa", इ: "i", ई: "ee", उ: "u", ऊ: "oo", ऋ: "ri", ए: "e", ऐ: "ai", ओ: "o", औ: "au", ऑ: "o", ऍ: "e" };
 const DEVA_SIGN: Record<string, string> = { "ा": "a", "ि": "i", "ी": "i", "ु": "u", "ू": "u", "ृ": "ri", "े": "e", "ै": "ai", "ो": "o", "ौ": "au", "ॉ": "o", "ॅ": "e" };
 const DEVA_OTHER: Record<string, string> = { "ं": "n", "ँ": "n", "ः": "h", "०": "0", "१": "1", "२": "2", "३": "3", "४": "4", "५": "5", "६": "6", "७": "7", "८": "8", "९": "9" };

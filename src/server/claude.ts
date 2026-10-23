@@ -3,14 +3,15 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import os from "node:os";
 import path from "node:path";
 import { query, type CanUseTool, type Query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { HOME, LIBRARY, PLUGIN, REPO, SESSIONS, inside } from "./paths.js";
+import { HOME, LIBRARY, PLUGIN, REPO, ROOT, SESSIONS, inside } from "./paths.js";
 
 /**
  * Claude behind the studio. Each conversation (one per video, plus one for the studio itself) runs Claude Code
  * through the Agent SDK on the user's own Claude login (never an API key), with the motionmaxxing plugin loaded. It
  * becomes a stream of events the page shows: streamed replies, collapsed tool steps, question cards for
  * AskUserQuestion and Allow / Deny cards for anything outside the studio's own tools and folders. Conversations are
- * saved in ~/.motionmaxxing/studio/sessions/ and resume the same Claude session when the user writes again.
+ * saved in the profile's <folder>/.studio/sessions/ (~/.motionmaxxing/studio/sessions/ without profiles) and resume
+ * the same Claude session when the user writes again.
  */
 
 /** A file the user attached to a message: saved in the library (POST /api/chat/:id/attach). */
@@ -50,7 +51,6 @@ interface Live {
   allowAlways: Set<string>;
 }
 
-const file = (id: string) => path.join(SESSIONS, `${id}.json`);
 const trim = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
 /** Commands that reach outside the machine or destroy things broadly: these always ask. */
@@ -78,7 +78,7 @@ export function needsPermission(tool: string, input: Record<string, unknown>, bl
 
 function toolSummary(name: string, input: Record<string, unknown>): string {
   const f = (k: string) => String(input[k] ?? "");
-  const short = (p: string) => p.replace(REPO + "/", "").replace(LIBRARY + "/", "").replace(os.homedir(), "~");
+  const short = (p: string) => p.replace(REPO + "/", "").replace(ROOT + "/", "").replace(os.homedir(), "~");
   switch (name) {
     case "Bash": return f("description") || trim(f("command"), 80);
     case "Read": return `Read ${short(f("file_path"))}`;
@@ -143,12 +143,21 @@ export class Claude {
   private global = new Set<(m: SessionMeta, e?: Ev) => void>();
   private saveTimers = new Map<string, NodeJS.Timeout>();
 
-  constructor(private readonly opts: { idleMs?: number; queryFn?: typeof query } = {}) {
-    if (!existsSync(SESSIONS)) return;
-    for (const f of readdirSync(SESSIONS)) {
+  // One per profile (main.ts claude()): its conversations in its own folder, run in its own library folder with its
+  // MM_PROFILE, fixed when it is made, so a profile's chat never runs in another one's folder whatever the request.
+  private readonly dir: string;
+  private readonly cwd: string;
+  private readonly env: Record<string, string>;
+
+  constructor(private readonly opts: { idleMs?: number; queryFn?: typeof query; dir?: string; cwd?: string; env?: Record<string, string> } = {}) {
+    this.dir = opts.dir ?? SESSIONS();
+    this.cwd = opts.cwd ?? LIBRARY();
+    this.env = opts.env ?? {};
+    if (!existsSync(this.dir)) return;
+    for (const f of readdirSync(this.dir)) {
       if (!f.endsWith(".json")) continue;
       try {
-        const s = JSON.parse(readFileSync(path.join(SESSIONS, f), "utf8")) as Session;
+        const s = JSON.parse(readFileSync(path.join(this.dir, f), "utf8")) as Session;
         if (s.status === "running" || s.status === "waiting") s.status = "stopped";   // the studio restarted
         for (const e of s.events) if ((e.k === "question" || e.k === "permission") && e.status === "waiting") e.status = "cancelled";
         this.sessions.set(s.id, s);
@@ -157,6 +166,14 @@ export class Claude {
   }
 
   list(): SessionMeta[] { return [...this.sessions.values()].map(meta).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); }
+  /** Whether a conversation (or any) is open with Claude now. */
+  busy(id?: string): boolean { return id ? this.live.has(id) : this.live.size > 0; }
+  /** Let go of a conversation whose file moved to another profile (profiles.py move-video): closed, never saved here again. */
+  forget(id: string): void {
+    if (this.live.has(id)) this.stop(id);
+    clearTimeout(this.saveTimers.get(id)); this.saveTimers.delete(id);
+    this.sessions.delete(id); this.listeners.delete(id);
+  }
   get(id: string): Session | undefined { return this.sessions.get(id); }
   /** Every change to any conversation, for the page's sidebar and alerts. */
   onAny(fn: (m: SessionMeta, e?: Ev) => void): () => void { this.global.add(fn); return () => this.global.delete(fn); }
@@ -251,12 +268,13 @@ export class Claude {
     const env: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) if (v !== undefined && k !== "ANTHROPIC_API_KEY" && k !== "CLAUDECODE") env[k] = v;
     env.MM_STUDIO = "1";
+    Object.assign(env, this.env);   // the profile: MM_LIBRARY (the top) and MM_PROFILE
     if (s.edit) env.MM_EDIT = s.edit;
     queue.push(first);
     const q = (this.opts.queryFn ?? query)({
       prompt: queue.iter,
       options: {
-        cwd: LIBRARY, abortController: abort, includePartialMessages: true, canUseTool, env,
+        cwd: this.cwd, abortController: abort, includePartialMessages: true, canUseTool, env,
         settingSources: ["user", "project", "local"], permissionMode: "default", additionalDirectories: [REPO, HOME],
         plugins: [{ type: "local", path: PLUGIN }],
         systemPrompt: { type: "preset", preset: "claude_code", append: STUDIO_RULES },
@@ -349,7 +367,7 @@ export class Claude {
   private setStatus(s: Session, status: SessionMeta["status"]): void { if (s.status === status) return; s.status = status; this.emitMeta(s); }
   private save(s: Session, later = false): void {
     clearTimeout(this.saveTimers.get(s.id));
-    const write = () => { mkdirSync(SESSIONS, { recursive: true }); writeFileSync(file(s.id), JSON.stringify(s)); };
+    const write = () => { mkdirSync(this.dir, { recursive: true }); writeFileSync(path.join(this.dir, `${s.id}.json`), JSON.stringify(s)); };
     if (!later) return write();
     this.saveTimers.set(s.id, setTimeout(write, 800));
   }

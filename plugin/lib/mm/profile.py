@@ -83,20 +83,62 @@ PLAIN_CAPTIONS = CAPTION_STYLES["plain"]
 
 
 def path():
+    """The shared answers (every profile's: platform, format, captions, sound...)."""
     return HOME / "profile.json"
 
 
+def own_path():
+    """The active profile's own profile.json (its language, brand kit, names and terms, handles...: profiles.OWN_KEYS),
+    or None without profiles (or with none picked)."""
+    import library
+    import profiles
+    try:
+        return profiles.settings_file(library.root(make=False))
+    except SystemExit:
+        return None
+
+
+def _read(p):
+    try:
+        d = json.loads(Path(p).read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def raw():
+    """What the user answered: the shared file, with the active profile's own keys from its own file (a key of a
+    profile's own never comes from the shared file then, so a profile never shows another one's names or brand)."""
+    import profiles
+    shared, own = _read(path()), own_path()
+    if own is None:
+        return shared
+    return {**{k: v for k, v in shared.items() if k not in profiles.OWN_KEYS},
+            **{k: v for k, v in _read(own).items() if k in profiles.OWN_KEYS}}
+
+
 def load():
-    p = path()
-    return {**DEFAULTS, **(json.loads(p.read_text(encoding="utf-8")) if p.exists() else {})}
+    return {**DEFAULTS, **raw()}
 
 
 def save(prof):
+    """The answers back: a profile's own keys into its profile.json, the rest into the shared one. -> the file of the
+    keys that were set (the shared one without profiles)."""
+    import profiles
     HOME.mkdir(parents=True, exist_ok=True)
-    raw = dict(prof)   # only what was answered: missing() reads the file
-    raw["aspect"] = ASPECT.get(raw.get("platform"), raw.get("aspect", "9:16"))
-    path().write_text(json.dumps(raw, indent=1), encoding="utf-8")
-    return path()
+    answered = dict(prof)   # only what was answered: missing() reads the files
+    answered["aspect"] = ASPECT.get(answered.get("platform"), answered.get("aspect", "9:16"))
+    own = own_path()
+    if own is None:
+        path().write_text(json.dumps(answered, indent=1, ensure_ascii=False), encoding="utf-8")
+        return path()
+    mine = {k: v for k, v in answered.items() if k in profiles.OWN_KEYS}
+    shared = {**{k: v for k, v in _read(path()).items() if k in profiles.OWN_KEYS},   # another profile's left alone
+              **{k: v for k, v in answered.items() if k not in profiles.OWN_KEYS}}
+    own.parent.mkdir(parents=True, exist_ok=True)
+    own.write_text(json.dumps(mine, indent=1, ensure_ascii=False), encoding="utf-8")
+    path().write_text(json.dumps(shared, indent=1, ensure_ascii=False), encoding="utf-8")
+    return own
 
 
 def save_defaults():
@@ -104,7 +146,7 @@ def save_defaults():
     finished on the recommended options) is an answer, so start never asks it again. The video questions too:
     audience "people curious about the topic" + goal "follow", names [] (found in what they say). A saved answer
     is kept, so the next video asks nothing."""
-    have = json.loads(path().read_text(encoding="utf-8")) if path().exists() else {}
+    have = raw()
     new = [q for q in QUESTIONS if q not in have]
     extra = {"goal": DEFAULTS["goal"]} if "audience" in new and "goal" not in have else {}
     save({**have, **{q: DEFAULTS[q] for q in new}, **extra})
@@ -113,7 +155,7 @@ def save_defaults():
 
 def missing(group=QUESTIONS):
     """The intake questions in `group` with no saved answer yet."""
-    have = json.loads(path().read_text(encoding="utf-8")) if path().exists() else {}
+    have = raw()
     return [q for q in group if q not in have]
 
 
@@ -330,10 +372,13 @@ def like_sample(style, handle):
 
 def creator_style(root, handle):
     """(style, path) for one profile creator: the parts the user ticked (<h>-mine, the same file its edit-like skill
-    and its corrections use) when there is one, else the whole measured <h>/style.json. (None, path) when neither."""
+    and its corrections use) when there is one, else the whole measured <h>/style.json. (None, path) when neither.
+    A sample style is at the library's top, shared by every profile: looked for there after the profile's own."""
+    import library
     d = Path(root) / "creator-teardowns"
-    for p in (d / f"{handle}-mine" / "style.json", d / handle / "style.json"):
-        if p.is_file():
+    top = library.root(make=False) / "creator-teardowns"
+    for p in (d / f"{handle}-mine" / "style.json", d / handle / "style.json", top / handle / "style.json"):
+        if p.is_file() and (p.parent.parent == d or library.is_sample_dir(p.parent)):
             return like_sample(heal(json.loads(p.read_text(encoding="utf-8")), p), handle), p
     return None, d / handle / "style.json"
 
@@ -578,6 +623,25 @@ def demo():
         assert like_sample({"skill": "my-edit"}, "own-card-edit") == {"skill": "my-edit"}   # a skill style: its skill decides
         st = blend({"own-card-edit": own}, [{"handle": "own-card-edit", "take": ["captions", "pace", "visuals"]}])
         assert st["card_kinds"] == own["card_kinds"] and st["cards"] == {"per_min": 15}, st
+        # profiles: a profile's own keys (language, names, brand...) in its own file, the rest shared
+        import profiles
+        old_lib, old_p = os.environ.get("MM_LIBRARY"), os.environ.pop("MM_PROFILE", None)
+        os.environ["MM_LIBRARY"] = str(Path(d) / "plib")
+        try:
+            profiles.add(Path(d) / "plib", "Anna", lang="de")
+            profiles.add(Path(d) / "plib", "Ben", lang="hinglish")
+            os.environ["MM_PROFILE"] = "ben"
+            save({**raw(), "names": [{"name": "Kotlin Kolkata"}], "platform": "reels"})
+            assert load()["lang"] == "hinglish" and load()["names"] == [{"name": "Kotlin Kolkata"}]
+            assert json.loads((Path(d) / "plib" / "Ben" / "profile.json").read_text())["names"][0]["name"] == "Kotlin Kolkata"
+            os.environ["MM_PROFILE"] = "anna"
+            assert load()["lang"] == "de" and load()["names"] == [] and load()["platform"] == "reels"   # shared: platform
+            assert "names" not in json.loads(path().read_text())                                     # never shared
+        finally:
+            for k, v in (("MM_LIBRARY", old_lib), ("MM_PROFILE", old_p)):
+                os.environ.pop(k, None)
+                if v is not None:
+                    os.environ[k] = v
     print("profile ok")
 
 
@@ -593,6 +657,8 @@ def main():
     a = sys.argv[1:]
     if a == ["demo"]:
         return demo()
+    import library
+    library.path(make=False)   # two or more profiles and none picked: stops with the question (ask which, then rerun)
     if a == ["show"]:
         print(json.dumps(load(), indent=1))
     elif a and a[0] == "missing":
@@ -608,7 +674,7 @@ def main():
         if bad:
             sys.exit(f"profile.py set: {bad[0]!r} is not key=value. Write every answer as key=value "
                      "(the `set key value` form takes one answer alone)")
-        prof = set_pairs(json.loads(path().read_text(encoding="utf-8")) if path().exists() else {}, pairs)
+        prof = set_pairs(raw(), pairs)
         print(f"set {', '.join(k for k, _ in pairs)} -> {save(prof)}")
         if any(k.split(".")[0] in STYLE_QUESTIONS for k, _ in pairs):
             my_style()

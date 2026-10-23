@@ -86,7 +86,7 @@ def library_dir():
     """<library>/custom/sounds: the user's own sound files and choices.json. Kept through every update (custom.py)."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
     from mm import custom
-    return custom.path(False) / "sounds"
+    return custom.sounds()   # one sound library for every profile
 
 
 def choices():

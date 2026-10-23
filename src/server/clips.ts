@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync,
 import path from "node:path";
 import { promisify } from "node:util";
 import * as lib from "./library.js";
-import { CUT, LIBRARY, python, slug } from "./paths.js";
+import { BROLL, CUT, profileEnv, python, slug } from "./paths.js";
 
 const run = promisify(execFile);
 
@@ -42,22 +42,26 @@ function order(r: lib.StudioRecord): void {
   r.files.sort((a, b) => rank(a) - rank(b) || (rank(a) === 0 ? when(a) - when(b) || a.name.localeCompare(b.name, undefined, { numeric: true }) : 0));
 }
 
+// keyed by the video's folder: two profiles can each have a video with the same id
 const timers = new Map<string, NodeJS.Timeout>(), busy = new Set<string>(), again = new Set<string>();
 
 export function classifySoon(id: string, done: () => void): void {
-  clearTimeout(timers.get(id));
-  timers.set(id, setTimeout(() => { timers.delete(id); void classify(id, done); }, 1500));
+  const k = lib.editDir(id);
+  clearTimeout(timers.get(k));
+  timers.set(k, setTimeout(() => { timers.delete(k); void classify(id, done); }, 1500));
 }
 
 /** Clips still "pending" with no check on its way (the studio restarted mid-check): check them now. A page that reads
  *  the video calls this, so a clip never waits forever and Make the cut is never held back by it. */
 export function resume(id: string, done: () => void): void {
-  if (!timers.has(id) && !busy.has(id) && clips(id).some((c) => c.kind === "pending")) classifySoon(id, done);
+  const k = lib.editDir(id);
+  if (!timers.has(k) && !busy.has(k) && clips(id).some((c) => c.kind === "pending")) classifySoon(id, done);
 }
 
 async function classify(id: string, done: () => void): Promise<void> {
-  if (busy.has(id)) { again.add(id); return; }
-  busy.add(id);
+  const k = lib.editDir(id);
+  if (busy.has(k)) { again.add(k); return; }
+  busy.add(k);
   try {
     const gone = clips(id).filter((c) => c.kind === "pending" && !existsSync(c.path));
     if (gone.length) {   // a file removed before its check: off the list, never "checking" forever
@@ -70,7 +74,7 @@ async function classify(id: string, done: () => void): Promise<void> {
     let rows: (Partial<lib.Clip> & { path: string })[] = [];
     try {
       const { stdout } = await run(python(), [path.join(CUT, "footage.py"), "classify", ...pend.map((c) => c.path)],
-        { maxBuffer: 16 << 20, env: { ...process.env, MM_LIBRARY: LIBRARY } });
+        { maxBuffer: 16 << 20, env: { ...process.env, ...profileEnv() } });
       rows = stdout.split("\n").filter((l) => l.startsWith("{")).map((l) => JSON.parse(l));
     } catch {   // the check failed (no models yet): never b-roll by accident
       rows = pend.map((c) => ({ path: c.path, kind: "take" as const, why: "could not check it: kept as a take" }));
@@ -86,8 +90,8 @@ async function classify(id: string, done: () => void): Promise<void> {
     if (first && r.files?.some((c) => c.kind === "broll" && r.title === c.name.replace(/\.[^.]+$/, ""))) r.title = first.name.replace(/\.[^.]+$/, "");
     lib.saveRecord(id, r);
   } finally {
-    busy.delete(id);
-    if (again.delete(id)) void classify(id, done);
+    busy.delete(k);
+    if (again.delete(k)) void classify(id, done);
     done();
   }
 }
@@ -119,7 +123,7 @@ export function removeClip(id: string, n: number): lib.Clip {
 
 // --- the library's b-roll ----------------------------------------------------------------------------------------
 
-export const BROLL = path.join(LIBRARY, "broll");
+export { BROLL };   // shared by every profile (paths.ts)
 const INDEX = path.join(BROLL, "broll.json");
 const VIDEO = /\.(mp4|mov|m4v|webm|mkv)$/i;
 interface Meta { title: string; added: string; from?: { id: string; title: string }; duration?: number }

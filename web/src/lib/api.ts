@@ -31,11 +31,20 @@ let source: EventSource | null = null;
 function connect(): void {
   if (source) return;
   source = new EventSource("/api/events");
-  for (const t of ["video", "demo", "script", "session", "setup", "hello"]) source.addEventListener(t, (e) => {
+  for (const t of ["video", "demo", "script", "session", "setup", "broll", "profiles", "hello"]) source.addEventListener(t, (e) => {
     const data = JSON.parse((e as MessageEvent).data || "{}");
+    // another profile's video or chat is not this page's news (null: the shared b-roll and recordings, everyone's)
+    const mine = currentProfile();
+    if (mine && typeof data?.profile === "string" && data.profile !== mine) return;
     for (const h of handlers) h(t, data);
   });
   source.onerror = () => { source?.close(); source = null; setTimeout(connect, 1500); };
+}
+
+/** The profile this browser picked (its cookie; the server runs every request as it), or null before one is. */
+export function currentProfile(): string | null {
+  const m = /(?:^|;\s*)mm_profile=([^;]+)/.exec(document.cookie);
+  return m ? decodeURIComponent(m[1]!) : null;
 }
 
 /** The studio's live events: a video changed, a conversation moved, setup progressed. */

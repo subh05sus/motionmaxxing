@@ -12,7 +12,9 @@
 
 The folder: ~/Movies/motionmaxxing on macOS, ~/Videos/motionmaxxing on Windows and Linux. MM_LIBRARY
 overrides it, then `set` (saved in $MM_HOME/library.json with every recorded edit folder).
-Inside: videos/ (dropped files), edits/<name>/, clips/<name>/, product/<name>/, creator-teardowns/<handle>/.
+Inside: videos/ (dropped files), edits/<name>/, clips/<name>/, product/<name>/, creator-teardowns/<handle>/. With
+profiles (profiles.py) those are in each profile's folder, and path() is the active profile's; root() is the top,
+with profiles.json and what every profile shares: broll/, recordings/, the sample styles, custom/sounds/.
 
 `clean` deletes only what a step rebuilds: render chunks, the sound-effect wav cache, unfinished
 uploads, and the review page's copies of each round older than the last two. Never a source, cut.mp4,
@@ -31,6 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from links import VIDEO_EXT  # noqa: E402
+import profiles  # noqa: E402
 
 KINDS = ("edits", "clips", "product")
 PROTECT = {"review.json", "cut.mp4", "render.mp4", "joined.mp4", "words.json", "takes.txt"}
@@ -60,11 +63,25 @@ def default_path(os_name=None):
     return Path.home() / ("Movies" if (os_name or platform.system()) == "Darwin" else "Videos") / "motionmaxxing"
 
 
-def path(make=True):
+def root(make=True):
+    """The library's top folder: profiles.json, every profile's folder, and what they share (broll/, recordings/, the
+    sample styles, custom/sounds/)."""
     p = Path(os.path.expanduser(os.environ.get("MM_LIBRARY", "").strip() or _index().get("path") or default_path()))
     if make:
         p.mkdir(parents=True, exist_ok=True)
     return p.resolve() if p.exists() else p
+
+
+def path(make=True):
+    """Where this profile's videos, styles and scripts live: the active profile's folder (profiles.active: MM_PROFILE,
+    else the only one; two or more and none picked stops with the question), or the top without profiles."""
+    top = root(make)
+    f = profiles.active(top)[1]
+    if f is None:
+        return top
+    if make:
+        f.mkdir(parents=True, exist_ok=True)
+    return f.resolve() if f.exists() else f
 
 
 def set_path(p):
@@ -178,30 +195,69 @@ def seed_samples(lib):
 
 
 def styles(lib=None):
-    """Every studied creator in the library with a style.json, the plugin's sample styles among them:
-    [(handle, style dict)]."""
-    seed_samples(lib or path())
-    out = []
-    for f in sorted((Path(lib or path()) / "creator-teardowns").glob("*/style.json")):
-        try:
-            out.append((f.parent.name, json.loads(f.read_text(encoding="utf-8"))))
-        except (OSError, ValueError):
-            pass
+    """The styles this profile can use: its studied creators and the plugin's sample styles (at the library's top,
+    shared by every profile): [(handle, style dict)]."""
+    top, own = root(), Path(lib) if lib else path()
+    seed_samples(top)
+    out, seen = [], set()
+    for base in dict.fromkeys((own, top)):
+        for f in sorted((base / "creator-teardowns").glob("*/style.json")):
+            # the top's own styles are a library from before profiles; with profiles only its samples are shared
+            if f.parent.name in seen or (base == top and own != top and not is_sample_dir(f.parent)):
+                continue
+            try:
+                out.append((f.parent.name, json.loads(f.read_text(encoding="utf-8"))))
+                seen.add(f.parent.name)
+            except (OSError, ValueError):
+                pass
     return out
 
 
+def is_sample_dir(d):
+    return (SAMPLES / Path(d).name / "style.json").is_file()
+
+
+def others():
+    """The other profiles' own styles, to borrow (copy into this profile): [(profile, handle, style dict, folder)]."""
+    top, me = root(), profiles.active(root(), strict=False)[0]
+    out = []
+    for p in profiles.load(top)["profiles"]:
+        if p["id"] == me:
+            continue
+        for f in sorted((top / p["folder"] / "creator-teardowns").glob("*/style.json")):
+            try:
+                out.append((p, f.parent.name, json.loads(f.read_text(encoding="utf-8")), f.parent))
+            except (OSError, ValueError):
+                pass
+    return out
+
+
+def borrow(src_dir, lib=None):
+    """Another profile's style copied into this profile's styles (its own copy from then on). -> the new folder."""
+    src = Path(src_dir)
+    dst_root = (Path(lib) if lib else path()) / "creator-teardowns"
+    dst, n = dst_root / src.name, 2
+    while dst.exists():
+        dst, n = dst_root / f"{src.name}-{n}", n + 1
+    shutil.copytree(src, dst)
+    s = json.loads((dst / "style.json").read_text(encoding="utf-8"))
+    s.pop("owner", None)   # their own style, not this profile's
+    (dst / "style.json").write_text(json.dumps(s, indent=1, ensure_ascii=False), encoding="utf-8")
+    return dst
+
+
 def own_style(lib=None):
-    """The handle of the owner's own measured style: the creator teardown whose style.json says "owner": true (a
-    teardown of the owner's own reels), or None."""
+    """The handle of this profile's own measured style: the creator teardown whose style.json says "owner": true (a
+    teardown of the profile's own reels), or None."""
     return next((h for h, s in styles(lib) if s.get("owner") is True), None)
 
 
 def recordings(lib=None):
     """Every finished demo recording in the library, newest first: [{name, title, url, show, for, videos}]. A recording
     shows a page or a product, so any edit whose line names it can show it, whichever video it was made for."""
-    root = Path(lib or path()) / "recordings"
+    rec = Path(lib or root()) / "recordings"   # shared by every profile: a page recorded once shows in any video
     out = []
-    for d in sorted((x for x in root.iterdir() if x.is_dir()), key=lambda x: x.stat().st_mtime, reverse=True) if root.is_dir() else []:
+    for d in sorted((x for x in rec.iterdir() if x.is_dir()), key=lambda x: x.stat().st_mtime, reverse=True) if rec.is_dir() else []:
         videos = sorted(f.name for f in d.glob("*.mp4"))
         if not videos:
             continue   # still recording, or failed
@@ -473,6 +529,41 @@ def demo():
           {"stage": "edit", "round": 2, "stills": True}, {"stage": "edit", "round": 3}]
     assert [draft_name(r, rr) for r in rr] == ["your clip", "draft 1", "preview 1", "preview 2", "draft 1"]
     assert draft_name(rr[2], rr[:3]) == "the preview"
+    # profiles: each one's own folder for its videos and styles; the samples and recordings shared at the top
+    plib = tmp / "plib"
+    os.environ["MM_LIBRARY"] = str(plib)
+    old_p = os.environ.pop("MM_PROFILE", None)
+    try:
+        assert path() == root() == plib.resolve()                                 # no profiles: one library
+        profiles.add(root(), "Anna")
+        assert path() == (plib / "Anna").resolve()                              # the only profile: its folder
+        profiles.add(root(), "Ben")
+        try:
+            path()
+            raise AssertionError("two profiles and none picked must ask")
+        except profiles.Ambiguous:
+            pass
+        os.environ["MM_PROFILE"] = "anna"
+        (path() / "creator-teardowns" / "anna-own").mkdir(parents=True)
+        (path() / "creator-teardowns" / "anna-own" / "style.json").write_text('{"owner": true}', encoding="utf-8")
+        (root() / "recordings" / "site").mkdir(parents=True)
+        (root() / "recordings" / "site" / "plain.mp4").write_bytes(b"x")
+        mine = [h for h, _ in styles()]
+        assert "anna-own" in mine and any(h.startswith("sample-") for h in mine), mine   # own + the shared samples
+        assert own_style() == "anna-own" and recordings()[0]["name"] == "site"
+        os.environ["MM_PROFILE"] = "ben"
+        assert own_style() is None and "anna-own" not in [h for h, _ in styles()]       # never the other's
+        assert recordings()[0]["name"] == "site"                                           # recordings: shared
+        theirs = others()
+        assert [(x[0]["id"], x[1]) for x in theirs] == [("anna", "anna-own")], theirs
+        got = borrow(theirs[0][3])                                                         # copied, not linked
+        assert got.parent == path() / "creator-teardowns" and "anna-own" in [h for h, _ in styles()]
+        assert own_style() is None                                                         # theirs, not Ben's own
+    finally:
+        os.environ.pop("MM_PROFILE", None)
+        os.environ.pop("MM_LIBRARY", None)
+        if old_p is not None:
+            os.environ["MM_PROFILE"] = old_p
     shutil.rmtree(tmp, ignore_errors=True)
     print("library demo ok")
 

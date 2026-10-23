@@ -57,10 +57,19 @@ def path(make=True):
     return p
 
 
+def sounds(make=False):
+    """custom/sounds/ at the library's top: one sound library for every profile (the user's choice); the other kinds
+    are each profile's own."""
+    p = library.root(make) / "custom" / "sounds"
+    if make:
+        p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def find(kind, name, default=None):
     """The user's custom/<kind>/<name> when it is a file, else default (the plugin's own file, or None)."""
     assert kind in KINDS, kind
-    p = path(False) / kind / name
+    p = (sounds() if kind == "sounds" else path(False) / kind) / name
     return p if p.is_file() else (Path(default) if default else None)
 
 

@@ -5,8 +5,10 @@ import { Celebrate, type Moment } from "@/components/celebrate";
 import { Toaster } from "@/components/toaster";
 import { ChatPanel } from "@/components/chat";
 import { Palette as CommandPalette } from "@/components/palette";
+import { ProfileSwitcher, WhoIsEditing } from "@/components/profiles";
 import { api, useApi, useEvents } from "@/lib/api";
 import { notify } from "@/lib/alerts";
+import { useProfiles } from "@/lib/profiles";
 import { Link, navigate, useRoute } from "@/lib/router";
 import { SPRING_DEFAULT } from "@/lib/motion";
 import { cn } from "@/lib/utils";
@@ -18,6 +20,7 @@ import { LibraryPage } from "@/pages/library";
 import { ScriptPage } from "@/pages/script";
 import { ScriptsPage } from "@/pages/scripts";
 import { NewVideoPage } from "@/pages/new-video";
+import { ProfilePage } from "@/pages/profile";
 import { SettingsPage } from "@/pages/settings";
 import { SetupPage } from "@/pages/setup";
 import { StylesPage } from "@/pages/styles";
@@ -48,6 +51,12 @@ export function App() {
   const [title, setTitleState] = useState<{ t: ReactNode; actions?: ReactNode }>({ t: "" });
   const setTitle = useCallback((t: ReactNode, actions?: ReactNode) => setTitleState({ t, actions }), []);
   const setup = useApi<{ rows: { ok: boolean }[] }>("/api/setup");
+  // Profiles: "Who's editing?" until this browser picked one (two or more); with one, it is simply used.
+  const profiles = useProfiles();
+  const only = profiles.data && profiles.list.length === 1 && !profiles.data.current ? profiles.list[0]!.id : null;
+  useEffect(() => { if (only) void api(`/api/profiles/${encodeURIComponent(only)}/select`, { method: "POST" }).then(() => profiles.reload()).catch(() => undefined); },
+    [only]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const pickFirst = !!profiles.data && profiles.list.length >= 2 && !profiles.data.current;
   const [skipSetup, setSkipSetup] = useStored("motionmaxxing:setup-skipped", false);
 
   useEffect(() => {
@@ -93,19 +102,18 @@ export function App() {
   else if (route.parts[0] === "styles") body = <StylesPage setTitle={setTitle} />;
   else if (route.parts[0] === "library") body = <LibraryPage setTitle={setTitle} />;
   else if (route.parts[0] === "settings") body = <SettingsPage setTitle={setTitle} />;
+  else if (route.parts[0] === "profile") body = <ProfilePage setTitle={setTitle} />;
   else body = <HomePage setTitle={setTitle} />;
   void page;
   const inEditor = ["videos", "demos", "scripts"].includes(route.parts[0] ?? "") && !!route.parts[1];
+  if (pickFirst) return <WhoIsEditing profiles={profiles.list} />;
 
   return (
     <div className="flex h-full bg-background">
       {/* Sidebar: solid (content layer), folds to an icon rail with ⌘B. */}
       <motion.aside animate={{ width: rail ? 52 : 216 }} transition={SPRING_DEFAULT}
         className="hidden shrink-0 flex-col overflow-hidden border-r bg-sidebar md:flex">
-        <div className="flex h-[52px] items-center gap-2 px-3.5">
-          <img src="/icon.png" alt="" className="size-7 shrink-0 -mx-0.5" />
-          {!rail && <span className="truncate headline">motionmaxxing</span>}
-        </div>
+        <ProfileSwitcher rail={rail} />
         <nav className="flex flex-1 flex-col gap-0.5 px-2">
           {NAV.map(({ href, label, icon: Icon }) => {
             const on = href === "/" ? route.path === "/" : route.path.startsWith(href) && !(href === "/videos" && false);
@@ -134,6 +142,7 @@ export function App() {
           <button onClick={() => setPalette(true)} className="hidden h-7 w-56 items-center gap-2 rounded-md bg-input px-2 text-faint-foreground hover:text-muted-foreground lg:flex">
             <Search className="size-3.5" /><span className="flex-1 text-left">Search or do anything</span><span className="kbd flex items-center gap-0.5"><Command className="size-3" />K</span>
           </button>
+          <div className="md:hidden"><ProfileSwitcher compact /></div>
           <button onClick={() => setChat(!chat)} title="Claude (⌘/)" className={cn("hidden size-7 place-items-center rounded-md hover:bg-foreground/8 lg:grid", chat ? "text-primary" : "text-muted-foreground")}><PanelRight className="size-4" /></button>
         </header>
         <div className="flex min-h-0 flex-1">

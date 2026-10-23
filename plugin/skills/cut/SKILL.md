@@ -30,7 +30,8 @@ edits/<name>/  transcript.txt (read this, never words.raw.json), spans.json (wha
 ```
 
 `<name>` is a slug of the file name (`IMG_1234.MOV` -> `img-1234`), in the library
-(PRINCIPLES.md "Where"). Never modify, move or copy the source file: pass its path.
+(PRINCIPLES.md "Where"). Never modify, move or copy the source file: pass its path. A library with profiles and no
+`MM_PROFILE` set (outside the studio): ask which profile first, as PRINCIPLES.md says.
 
 `PY="${CLAUDE_PLUGIN_ROOT}/lib/mm/run.py"`; `python3 "$PY"` runs the engine venv.
 No venv yet: run the `setup` skill first. `S="${CLAUDE_SKILL_DIR}/scripts"`.

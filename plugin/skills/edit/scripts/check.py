@@ -92,7 +92,7 @@ def recording_findings(edit, visuals, root=None):
     if root is None:
         sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
         from mm import library
-        root = library.path(make=False) / "recordings"
+        root = library.root(make=False) / "recordings"   # shared by every profile
     if not Path(root).exists():
         return []
     used = set()

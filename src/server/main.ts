@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
-import { createReadStream, createWriteStream, existsSync, readFileSync, readdirSync, rmSync, statSync, watch, writeFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, cpSync, createReadStream, createWriteStream, existsSync, readFileSync, readdirSync, rmSync, statSync, watch, writeFileSync, mkdirSync } from "node:fs";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { Claude, type Ev, type SessionMeta } from "./claude.js";
@@ -9,7 +10,9 @@ import * as clipsMod from "./clips.js";
 import * as lib from "./library.js";
 import * as scripts from "./scripts.js";
 import * as bin from "./trash.js";
-import { CUT, EDITS, HOME, LIBRARY, PLUGIN, PORT, RECORDINGS, SETUP, VIDEOS, WEB_DIST, ensureDirs, python, slug } from "./paths.js";
+import { CUT, EDITS, HOME, LIBRARY, PLUGIN, PORT, RECORDINGS, ROOT, SESSIONS, SETUP, VIDEOS, WEB_DIST, ensureDirs, pickProfile, profile,
+  profileEnv, profileId, profiles, python, slug, withProfile } from "./paths.js";
+import * as prof from "./profiles.js";
 
 /**
  * The studio's server: the page (web/dist), its API, live events, the library's media, and Claude behind it. Local only:
@@ -17,34 +20,52 @@ import { CUT, EDITS, HOME, LIBRARY, PLUGIN, PORT, RECORDINGS, SETUP, VIDEOS, WEB
  */
 
 ensureDirs();
-const claude = new Claude();
 const sse = new Set<http.ServerResponse>();
 
+/** A live event for the open pages, with the profile it belongs to (a page shows only its own profile's). */
 function broadcast(type: string, data: unknown): void {
-  const line = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+  const d = data && typeof data === "object" && !Array.isArray(data) ? { profile: profileId(), ...data } : data;
+  const line = `event: ${type}\ndata: ${JSON.stringify(d)}\n\n`;
   for (const r of sse) r.write(line);
 }
-claude.onAny((meta: SessionMeta, e?: Ev) => broadcast("session", { meta, kind: e?.k, tone: e && e.k === "status" ? e.tone : undefined }));
+
+// One Claude per profile: its conversations in its own folder, run in its own library folder (main.ts claude()).
+const claudes = new Map<string, Claude>();
+function claude(): Claude {
+  const p = profileId() ?? "";
+  let c = claudes.get(p);
+  if (!c) {
+    c = new Claude({ dir: SESSIONS(), cwd: LIBRARY(), env: profileEnv() });
+    c.onAny((meta: SessionMeta, e?: Ev) => broadcast("session", { meta, kind: e?.k, tone: e && e.k === "status" ? e.tone : undefined, profile: p || null }));
+    claudes.set(p, c);
+  }
+  return c;
+}
+/** Every profile's ids (or [null] without profiles), to do something for each, as that profile. */
+const eachProfile = (fn: () => void): void => { for (const p of profiles().length ? profiles().map((x) => x.id) : [null]) withProfile(p, fn); };
 
 // The pages stay live whoever does the work (the studio's jobs, Claude here or in a terminal, a script run by hand):
 // every 2 s a few file times per video; a change pushes "video" to the open pages (a render: its frame count).
 const seen = new Map<string, string>();
 setInterval(() => {
   if (!sse.size) return;
-  for (const id of lib.ids()) {
-    const sig = lib.signature(id);
-    if (seen.has(id) && seen.get(id) !== sig) broadcast("video", { id });
-    seen.set(id, sig);
-  }
+  eachProfile(() => {
+    for (const id of lib.ids()) {
+      const k = `${profileId() ?? ""}/${id}`, sig = lib.signature(id);
+      if (seen.has(k) && seen.get(k) !== sig) broadcast("video", { id });
+      seen.set(k, sig);
+    }
+  });
 }, 2000).unref();
 
 // --- jobs: scripts the studio runs itself (no Claude, no tokens) ---------------------------------------------------
 
 const jobs = new Map<string, { name: string; startedAt: string }>();
+const jk = (id: string): string => (id.startsWith("__") ? id : `${profileId() ?? ""}/${id}`);   // a video's job, in its profile
 
 function runScript(args: string[], opts: { cwd?: string; env?: Record<string, string> } = {}): Promise<{ code: number; out: string; err: string }> {
   return new Promise((resolve) => {
-    const p = spawn(python(), args, { cwd: opts.cwd ?? LIBRARY, env: { ...process.env, MM_LIBRARY: LIBRARY, ...opts.env } });
+    const p = spawn(python(), args, { cwd: opts.cwd ?? LIBRARY(), env: { ...process.env, ...profileEnv(), ...opts.env } });
     let out = "", err = "";
     p.stdout.on("data", (b) => { out += b; });
     p.stderr.on("data", (b) => { err += b; });
@@ -56,7 +77,7 @@ function runScript(args: string[], opts: { cwd?: string; env?: Record<string, st
 async function py<T>(code: string, stdin?: string): Promise<T> {
   const pre = `import sys, json; sys.path.insert(0, ${JSON.stringify(path.join(PLUGIN, "lib"))})\n`;
   const r = await new Promise<{ code: number; out: string; err: string }>((resolve) => {
-    const pr = spawn(python(), ["-c", pre + code], { env: { ...process.env, MM_LIBRARY: LIBRARY } });
+    const pr = spawn(python(), ["-c", pre + code], { env: { ...process.env, ...profileEnv() } });
     let out = "", err = "";
     pr.stdout.on("data", (x) => { out += x; }); pr.stderr.on("data", (x) => { err += x; });
     pr.on("close", (c) => resolve({ code: c ?? 1, out, err }));
@@ -76,8 +97,8 @@ function step(id: string, text: string, extra: Record<string, unknown> = {}): vo
 
 /** After an edit to the cut: build the timeline again and render the cut, then tell the conversation. */
 async function rebuild(id: string, why: string): Promise<void> {
-  if (jobs.has(id)) return;
-  jobs.set(id, { name: "rebuild", startedAt: new Date().toISOString() });
+  if (jobs.has(jk(id))) return;
+  jobs.set(jk(id), { name: "rebuild", startedAt: new Date().toISOString() });
   const d = lib.editDir(id);
   const src = existsSync(path.join(d, "source.mp4")) ? path.join(d, "source.mp4") : lib.record(id).source;
   try {
@@ -94,14 +115,111 @@ async function rebuild(id: string, why: string): Promise<void> {
     if (r.code) throw new Error(r.err.trim().split("\n").slice(-2).join(" "));
     step(id, "The cut is ready", { done: true, progress: 1 });
     const s = lib.record(id).session;
-    if (s) claude.note(s, `${why}: the cut was rebuilt and rendered.`, "ok");
+    if (s) claude().note(s, `${why}: the cut was rebuilt and rendered.`, "ok");
   } catch (e) {
     step(id, "The cut could not be rebuilt", { failed: (e as Error).message });
   } finally {
-    jobs.delete(id);
+    jobs.delete(jk(id));
     broadcast("video", { id });
   }
 }
+
+/** Export a video for Final Cut, Premiere, Resolve, CapCut and an editor (export_nle.py, no Claude). deliver: then
+ *  copied with the video into the profile's export folder (its settings' export_dir, else <profile>/Exports); else the
+ *  export folder opens in the Finder. */
+function exportVideo(id: string, deliver: boolean): void {
+  jobs.set(jk(id), { name: "export", startedAt: new Date().toISOString() });
+  step(id, "Exporting for Final Cut, Premiere, Resolve and CapCut");
+  void runScript([path.join(PLUGIN, "skills", "edit", "scripts", "export_nle.py"), lib.editDir(id), "--to", "all"])
+    .then((r) => {
+      if (r.code) return step(id, "The export stopped", { failed: r.err.trim().split("\n").slice(-1)[0] });
+      const to = deliver ? deliverTo(id) : null;
+      step(id, to ? `Exported to ${to.replace(os.homedir(), "~")}` : "Exported", { done: true, progress: 1 });
+      if (!to) spawn("open", [path.join(lib.editDir(id), "export")], { stdio: "ignore", detached: true }).unref();
+    })
+    .catch((e) => step(id, "The export stopped", { failed: (e as Error).message }))
+    .finally(() => { jobs.delete(jk(id)); broadcast("video", { id }); });
+}
+
+/** The profile's export folder: its settings' export_dir, else <profile>/Exports (null without profiles). */
+function exportBase(): string | null {
+  const p = profile();
+  return p ? String(prof.settings(p).export_dir ?? "").trim().replace(/^~(?=$|\/)/, os.homedir()) || path.join(prof.folder(p), "Exports") : null;
+}
+
+/** The video (named by its title), its SRT, the NLE files and the editor handoff, into <export folder>/<title>/. */
+function deliverTo(id: string): string | null {
+  const base = exportBase();
+  if (!base) return null;
+  const name = lib.record(id).title.replace(/[/\\:*?"<>|]+/g, "-").trim() || id;
+  const dest = path.join(base, name);
+  mkdirSync(dest, { recursive: true });
+  const exp = path.join(lib.editDir(id), "export");
+  if (existsSync(exp)) cpSync(exp, dest, { recursive: true });
+  const render = path.join(lib.editDir(id), "render.mp4");
+  if (existsSync(render)) copyFileSync(render, path.join(dest, `${name}.mp4`));
+  return dest;
+}
+
+// --- profiles -----------------------------------------------------------------------------------------------------
+
+/** This device picks a profile: its cookie (every later request, video and picture runs as it) and the studio's last
+ *  pick (background work outside a request). */
+function selectProfile(res: http.ServerResponse, id: string): void {
+  pickProfile(id);
+  res.setHeader("set-cookie", `mm_profile=${encodeURIComponent(id)}; Path=/; Max-Age=315360000; SameSite=Lax`);
+}
+const hasHandles = (h: unknown): h is Record<string, string> =>
+  !!h && typeof h === "object" && Object.values(h as Record<string, unknown>).some((v) => typeof v === "string" && v.trim());
+
+/** A profile's own style, measured from its handles in the background (creator-teardown), marked as its own. */
+function measureStyle(id: string, handles: Record<string, string>): void {
+  withProfile(id, () => {
+    const who = profile()?.name ?? id;
+    const list = Object.entries(handles).filter(([, v]) => v?.trim()).map(([k, v]) => `${k}: ${v.trim().replace(/^@/, "")}`).join(", ");
+    claude().ensure("measure", `Measuring ${who}'s style`, LIBRARY());
+    claude().send("measure", `Measure ${who}'s style from their reels.`, [
+      `You are working inside the motionmaxxing studio, in the profile of ${who} (its library folder is ${LIBRARY()}).`,
+      `Measure ${who}'s own style with the motionmaxxing creator-teardown skill (load it with the Skill tool:`,
+      "motionmaxxing:creator-teardown), from their recent short videos. Their accounts: " + list + ".",
+      "- Only the style is needed: follow the skill's own note for when another skill needs only the style.json.",
+      "- Write it under creator-teardowns/<handle>/ in this folder, and add \"owner\": true to its style.json (the one key the",
+      "  skill lets you set): it is this profile's own style, and every edit in this profile starts from it.",
+      "- A platform that cannot be reached (TikTok blocked, Instagram behind a login): use the others, and say which in the end.",
+      "- Never ask: decide. End with one short line: how many videos were measured and the style in a few words.",
+    ].join("\n"));
+  });
+}
+
+/** Every week a profile's own style is measured again from its newest reels, as a proposal beside the style it has:
+ *  style.next.json and style.change.md (what changed), until the owner says use it (the profile home). */
+const WEEK_MS = 7 * 24 * 3600 * 1000;
+function refreshStyles(): void {
+  eachProfile(() => {
+    const p = profile();
+    if (!p || !hasHandles(prof.settings(p).handles)) return;
+    const own = ownStyle(), c = claude();
+    if (!own || c.get("measure")?.status === "running" || c.get("remeasure")?.status === "running") return;
+    const dir = path.join(prof.folder(p), "creator-teardowns", own);
+    if (existsSync(path.join(dir, "style.next.json"))) return;   // a proposal waits for the owner
+    const age = Date.now() - Math.max(statSync(path.join(dir, "style.json")).mtimeMs, (() => { try { return statSync(path.join(dir, ".measured")).mtimeMs; } catch { return 0; } })());
+    if (age < WEEK_MS) return;
+    writeFileSync(path.join(dir, ".measured"), new Date().toISOString());   // tried this week, whatever comes of it
+    c.ensure("remeasure", `Measuring ${p.name}'s style again`, LIBRARY());
+    c.send("remeasure", `Measure ${p.name}'s style again from the newest reels.`, [
+      `You are working inside the motionmaxxing studio, in the profile of ${p.name} (its library folder is ${LIBRARY()}).`,
+      `Measure ${p.name}'s style again from their newest short videos with the motionmaxxing creator-teardown skill (the`,
+      `Skill tool: motionmaxxing:creator-teardown), style only, as the skill's note for that says, into creator-teardowns/${own}/.`,
+      `Their accounts: ${Object.entries(prof.settings(p).handles as Record<string, string>).filter(([, v]) => v?.trim()).map(([k, v]) => `${k}: ${v}`).join(", ")}.`,
+      `- Before you start, copy creator-teardowns/${own}/style.json to style.prev.json. When it is measured, move the new style.json`,
+      "  to style.next.json and put style.prev.json back as style.json: the new one is a proposal the owner approves.",
+      "- Write style.change.md beside it: at most five short lines, what changed in numbers a person can see (caption size and",
+      "  place, cuts or zooms a minute, how much half-screen or full-screen, music), or one line saying nothing that matters changed.",
+      `- Keep "owner": true in style.next.json. Never ask: decide. End with one short line.`,
+    ].join("\n"));
+  });
+}
+setTimeout(() => { refreshStyles(); setInterval(refreshStyles, 6 * 3600 * 1000).unref(); }, 120_000).unref();
 
 // --- prompts ------------------------------------------------------------------------------------------------------
 
@@ -161,7 +279,7 @@ function cutPrompt(id: string, extra: { instructions?: string; script?: string }
 
 /** The owner's own measured style: the creator teardown whose style.json says "owner": true (library.py own-style). */
 function ownStyle(): string | null {
-  const root = path.join(LIBRARY, "creator-teardowns");
+  const root = path.join(LIBRARY(), "creator-teardowns");
   try {
     for (const h of readdirSync(root).sort()) {
       try { if (JSON.parse(readFileSync(path.join(root, h, "style.json"), "utf8")).owner === true) return h; } catch { /* not a style */ }
@@ -178,7 +296,7 @@ function editPrompt(id: string): string {
     "the Skill tool: motionmaxxing:edit) and follow it through step 8, with these settled:",
     "",
     `- Edit folder: ${d} (cut.mp4, words.json and cut.transcript.json are there)`,
-    own ? `- The style: the owner's own measured style, ${path.join(LIBRARY, "creator-teardowns", own, "style.json")} (copy it to style.json), unless the chat named another.`
+    own ? `- The style: the owner's own measured style, ${path.join(LIBRARY(), "creator-teardowns", own, "style.json")} (copy it to style.json), unless the chat named another.`
         : "- The style: step 1 of the skill picks it.",
     ...langLine(lib.lang(id), "edit"),
     ...(r.broll?.length ? [
@@ -249,12 +367,18 @@ function sendFile(req: http.IncomingMessage, res: http.ServerResponse, f: string
 
 function streamSession(req: http.IncomingMessage, res: http.ServerResponse, sid: string): void {
   res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
-  const off = claude.subscribe(sid, (e) => res.write(`data: ${JSON.stringify(e)}\n\n`));
+  const off = claude().subscribe(sid, (e) => res.write(`data: ${JSON.stringify(e)}\n\n`));
   const ping = setInterval(() => res.write(": ping\n\n"), 20_000);
   req.on("close", () => { off(); clearInterval(ping); });
 }
 
-const server = http.createServer(async (req, res) => {
+const cookieProfile = (req: http.IncomingMessage): string | null => {
+  const m = /(?:^|;\s*)mm_profile=([^;]+)/.exec(String(req.headers.cookie ?? ""));
+  const id = m ? decodeURIComponent(m[1]!) : null;
+  return id && profiles().some((p) => p.id === id) ? id : null;
+};
+const server = http.createServer((req, res) => withProfile(cookieProfile(req) ?? (profiles().length ? profileId() : null), () => handle(req, res)));
+async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   try {
     const url = new URL(req.url ?? "/", "http://localhost");
     const p = url.pathname, m = req.method ?? "GET";
@@ -268,7 +392,68 @@ const server = http.createServer(async (req, res) => {
       req.on("close", () => { sse.delete(res); clearInterval(ping); });
       return;
     }
-    if (p === "/api/state") return sendJson(res, 200, { library: LIBRARY, home: HOME, plugin: PLUGIN, version: JSON.parse(readFileSync(path.join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version });
+    // --- profiles: one creator each (paths.ts, profiles.ts) --------------------------------------------------------
+    if (p === "/api/profiles" && m === "GET") {
+      return sendJson(res, 200, { profiles: profiles().map(prof.card), current: cookieProfile(req) });
+    }
+    if (p === "/api/profiles" && m === "POST") {
+      const b = await body(req);
+      if (!String(b.name ?? "").trim()) return sendJson(res, 400, { error: "give the profile a name" });
+      const made = await prof.add(String(b.name), { lang: typeof b.lang === "string" && lib.LANGS[b.lang] ? b.lang : undefined,
+        copyFrom: typeof b.copy_from === "string" ? b.copy_from : undefined });
+      const before = claudes.get("");   // the first profile took the library and its chats (profiles.py adopt)
+      if (before && !before.busy()) claudes.delete("");
+      prof.saveSettings(made, { ...(b.handles ? { handles: b.handles } : {}), ...(b.brand ? { brand: b.brand } : {}), ...(b.cta ? { cta: b.cta } : {}) });
+      selectProfile(res, made.id);
+      if (hasHandles(b.handles)) measureStyle(made.id, b.handles);   // the owner's choice: start right away
+      broadcast("profiles", { profile: null });
+      return sendJson(res, 201, prof.card(made));
+    }
+    if (seg[0] === "api" && seg[1] === "profiles" && seg[2]) {
+      const pr = prof.byId(seg[2]);
+      if (!pr) return sendJson(res, 404, { error: "no such profile" });
+      const action = seg[3];
+      if (action === "select" && m === "POST") { selectProfile(res, pr.id); return sendJson(res, 200, { ok: true }); }
+      if (action === "settings" && m === "GET") {
+        return sendJson(res, 200, { ...prof.card(pr), settings: prof.settings(pr), folder: prof.folder(pr), ownStyle: withProfile(pr.id, ownStyle),
+          measuring: withProfile(pr.id, () => claude().get("measure")?.status === "running") });
+      }
+      if (action === "settings" && m === "POST") {
+        const b = await body(req);
+        if (typeof b.name === "string" && b.name.trim()) prof.rename(pr.id, b.name);
+        const before = JSON.stringify(prof.settings(pr).handles ?? {});
+        const saved = prof.saveSettings(pr, b);
+        if ("handles" in b && JSON.stringify(b.handles ?? {}) !== before && hasHandles(b.handles)) measureStyle(pr.id, b.handles);
+        broadcast("profiles", { profile: null });
+        return sendJson(res, 200, { ...prof.card(prof.byId(pr.id)!), settings: saved });
+      }
+      if (action === "picture" && m === "POST") {
+        const ext = (path.extname(decodeURIComponent(String(req.headers["x-filename"] ?? "p.jpg"))).toLowerCase().match(/^\.(jpe?g|png|webp|heic)$/) ?? [".jpg"])[0];
+        const f = path.join(prof.folder(pr), `picture${ext}`);
+        await new Promise<void>((resolve, reject) => { const w = createWriteStream(f); req.pipe(w); w.on("finish", resolve); w.on("error", reject); });
+        prof.setPicture(pr.id, f);
+        broadcast("profiles", { profile: null });
+        return sendJson(res, 200, prof.card(prof.byId(pr.id)!));
+      }
+      if (action === "logo" && m === "POST") {   // the brand kit's logo, in the profile's folder (brand.logo names it)
+        const ext = (path.extname(decodeURIComponent(String(req.headers["x-filename"] ?? "l.png"))).toLowerCase().match(/^\.(svg|png|jpe?g|webp)$/) ?? [".png"])[0];
+        mkdirSync(path.join(prof.folder(pr), "brand"), { recursive: true });
+        const f = path.join(prof.folder(pr), "brand", `logo${ext}`);
+        await new Promise<void>((resolve, reject) => { const w = createWriteStream(f); req.pipe(w); w.on("finish", resolve); w.on("error", reject); });
+        const brand: Record<string, unknown> = { ...((prof.settings(pr).brand as Record<string, unknown> | undefined) ?? {}), logo: f };
+        delete brand.use_creator;
+        return sendJson(res, 200, { settings: prof.saveSettings(pr, { brand }) });
+      }
+      if (action === "logo" && m === "GET") {
+        const f = String((prof.settings(pr).brand as { logo?: string } | undefined)?.logo ?? "");
+        return f && existsSync(f) ? sendFile(req, res, f) : void res.writeHead(404).end();
+      }
+      if (action === "picture" && m === "GET") {
+        const f = prof.picturePath(pr);
+        return f ? sendFile(req, res, f) : void res.writeHead(404).end();
+      }
+    }
+    if (p === "/api/state") return sendJson(res, 200, { library: LIBRARY(), root: ROOT, profile: profileId(), home: HOME, plugin: PLUGIN, version: JSON.parse(readFileSync(path.join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version });
     if (p === "/api/setup" && m === "GET") {
       const r = await runScript([SETUP, "doctor", "--json"]);
       return sendJson(res, 200, { rows: JSON.parse(r.out || "[]"), installing: jobs.has("__setup") });
@@ -294,10 +479,10 @@ const server = http.createServer(async (req, res) => {
       const name = req.headers["x-filename"] ? decodeURIComponent(String(req.headers["x-filename"])) : undefined;
       let source: string, title: string;
       if (name) {
-        mkdirSync(VIDEOS, { recursive: true });
+        mkdirSync(VIDEOS(), { recursive: true });
         const ext = path.extname(name) || ".mp4";
-        let f = path.join(VIDEOS, slug(name) + ext), n = 2;
-        while (existsSync(f)) f = path.join(VIDEOS, `${slug(name)}-${n++}${ext}`);
+        let f = path.join(VIDEOS(), slug(name) + ext), n = 2;
+        while (existsSync(f)) f = path.join(VIDEOS(), `${slug(name)}-${n++}${ext}`);
         await new Promise<void>((resolve, reject) => { const w = createWriteStream(f); req.pipe(w); w.on("finish", resolve); w.on("error", reject); });
         source = f; title = name.replace(/\.[^.]+$/, "");
       } else {
@@ -317,17 +502,17 @@ const server = http.createServer(async (req, res) => {
       const action = seg[3];
       if (!action && m === "GET") {
         const r = lib.record(id);
-        const c = r.session ? claude.get(r.session) : undefined;
+        const c = r.session ? claude().get(r.session) : undefined;
         clipsMod.resume(id, () => broadcast("video", { id }));
-        return sendJson(res, 200, { ...lib.summary(id), transcript: lib.transcript(id), plan: lib.plan(id), notes: lib.notes(id), job: jobs.get(id) ?? null, chat: c ? { id: c.id, status: c.status } : null });
+        return sendJson(res, 200, { ...lib.summary(id), transcript: lib.transcript(id), plan: lib.plan(id), notes: lib.notes(id), job: jobs.get(jk(id)) ?? null, chat: c ? { id: c.id, status: c.status } : null });
       }
       // more clips dropped onto the same new video (takes, parts, b-roll), each checked like the first
       if (action === "files" && m === "POST" && !seg[4]) {
         const name = decodeURIComponent(String(req.headers["x-filename"] ?? "clip.mp4"));
-        mkdirSync(VIDEOS, { recursive: true });
+        mkdirSync(VIDEOS(), { recursive: true });
         const ext = path.extname(name) || ".mp4";
-        let f = path.join(VIDEOS, slug(name) + ext), n = 2;
-        while (existsSync(f)) f = path.join(VIDEOS, `${slug(name)}-${n++}${ext}`);
+        let f = path.join(VIDEOS(), slug(name) + ext), n = 2;
+        while (existsSync(f)) f = path.join(VIDEOS(), `${slug(name)}-${n++}${ext}`);
         await new Promise<void>((resolve, reject) => { const w = createWriteStream(f); req.pipe(w); w.on("finish", resolve); w.on("error", reject); });
         const at = clipsMod.addClip(id, f, name);
         clipsMod.classifySoon(id, () => broadcast("video", { id }));
@@ -345,7 +530,7 @@ const server = http.createServer(async (req, res) => {
         try {
           if (b.remove) {
             const c = clipsMod.removeClip(id, n);
-            if (path.resolve(c.path).startsWith(VIDEOS + path.sep)) bin.trash("video", path.basename(c.path), c.name, [c.path]);
+            if (path.resolve(c.path).startsWith(VIDEOS() + path.sep)) bin.trash("video", path.basename(c.path), c.name, [c.path]);
           } else clipsMod.setClip(id, n, { kind: b.kind === "broll" ? "broll" : b.kind === "take" ? "take" : undefined, move: Number(b.move) || 0 });
         } catch (e) { return sendJson(res, 400, { error: (e as Error).message }); }
         broadcast("video", { id });
@@ -379,8 +564,8 @@ const server = http.createServer(async (req, res) => {
         lib.setMeta(id, { lang_asked: lang ?? "auto" });
         const sid = `v_${id}`;
         r.session = sid; lib.saveRecord(id, r);
-        claude.ensure(sid, r.title, lib.editDir(id));
-        claude.send(sid, b.instructions?.trim() ? `Cut this take. ${b.instructions.trim()}` : "Cut this take.", cutPrompt(id, { instructions: b.instructions, script }));
+        claude().ensure(sid, r.title, lib.editDir(id));
+        claude().send(sid, b.instructions?.trim() ? `Cut this take. ${b.instructions.trim()}` : "Cut this take.", cutPrompt(id, { instructions: b.instructions, script }));
         broadcast("video", { id });
         return sendJson(res, 202, { session: sid });
       }
@@ -407,8 +592,8 @@ const server = http.createServer(async (req, res) => {
         if (!open.length) return sendJson(res, 400, { error: "no new notes" });
         const sid = r.session ?? `v_${id}`;
         if (!r.session) { r.session = sid; lib.saveRecord(id, r); }
-        claude.ensure(sid, r.title, lib.editDir(id));
-        claude.send(sid, `Notes:\n${open.map((x) => `${x.t.toFixed(1)} s: ${x.text}`).join("\n")}`, notesPrompt(id, open));
+        claude().ensure(sid, r.title, lib.editDir(id));
+        claude().send(sid, `Notes:\n${open.map((x) => `${x.t.toFixed(1)} s: ${x.text}`).join("\n")}`, notesPrompt(id, open));
         const now = new Date().toISOString();
         lib.saveNotes(id, all.map((x) => (x.sent ? x : { ...x, sent: now })));
         broadcast("video", { id });
@@ -423,37 +608,49 @@ const server = http.createServer(async (req, res) => {
         const sid = r.session ?? `v_${id}`;
         if (!r.session) r.session = sid;
         lib.saveRecord(id, r);
-        claude.ensure(sid, r.title, lib.editDir(id));
+        claude().ensure(sid, r.title, lib.editDir(id));
         if (stage === "cut") {
           // Approving the cut is the go for the edit (one approve, then the edit is made and shown).
-          claude.send(sid, "The cut is approved. Make the edit.", editPrompt(id));
+          claude().send(sid, "The cut is approved. Make the edit.", editPrompt(id));
         } else {
-          claude.send(sid, "The user approved the edit.", `The user approved the edit of ${lib.editDir(id)}. Do the edit skill's step 8 after approval (save the motion clips), then stop with one short line.`);
+          claude().send(sid, "The user approved the edit.", `The user approved the edit of ${lib.editDir(id)}. Do the edit skill's step 8 after approval (save the motion clips), then stop with one short line.`);
+          // the approved video, its captions and the editor handoff into the profile's export folder (the owner's choice)
+          if (profile() && !jobs.has(jk(id)) && existsSync(path.join(lib.editDir(id), "plan.json"))) exportVideo(id, true);
         }
         broadcast("video", { id });
         return sendJson(res, 200, lib.summary(id));
       }
       if (action === "export" && m === "POST") {
         // Final Cut, Premiere, Resolve, EDL, SRT, the CapCut steps and the handoff, all at once, no Claude needed.
-        if (jobs.has(id)) return sendJson(res, 409, { error: "something is running on this video; try again in a moment" });
+        if (jobs.has(jk(id))) return sendJson(res, 409, { error: "something is running on this video; try again in a moment" });
         if (!existsSync(path.join(lib.editDir(id), "plan.json"))) return sendJson(res, 400, { error: "make the edit first" });
-        jobs.set(id, { name: "export", startedAt: new Date().toISOString() });
-        step(id, "Exporting for Final Cut, Premiere, Resolve and CapCut");
-        void runScript([path.join(PLUGIN, "skills", "edit", "scripts", "export_nle.py"), lib.editDir(id), "--to", "all"])
-          .then((r) => {
-            if (r.code) step(id, "The export stopped", { failed: r.err.trim().split("\n").slice(-1)[0] });
-            else { step(id, "Exported", { done: true, progress: 1 }); spawn("open", [path.join(lib.editDir(id), "export")], { stdio: "ignore", detached: true }).unref(); }
-          })
-          .finally(() => { jobs.delete(id); broadcast("video", { id }); });
+        exportVideo(id, !!profile());
         return sendJson(res, 202, { ok: true });
+      }
+      if (action === "move" && m === "POST") {   // into another profile: the video, its raw takes and its chat
+        const b = await body(req), to = prof.byId(String(b.to ?? "")), from = profileId();
+        if (!to || !from || to.id === from) return sendJson(res, 400, { error: "pick another profile" });
+        const r = lib.record(id), sid = r.session ?? `v_${id}`, c = claude(), s = c.get(sid);
+        if (jobs.has(jk(id)) || lib.working(id) || (s && (s.status === "running" || s.status === "waiting")))
+          return sendJson(res, 409, { error: "something is working on this video; move it when it is done" });
+        if (withProfile(to.id, () => existsSync(lib.editDir(id)))) return sendJson(res, 409, { error: `${to.name} has a video with this name; rename one first` });
+        if (c.busy(sid)) c.stop(sid);
+        const out = await runScript([path.join(PLUGIN, "lib", "mm", "profiles.py"), "move-video", id, "--from", from, "--to", to.id]);
+        if (out.code) return sendJson(res, 500, { error: out.err.trim().split("\n").slice(-1)[0] || "the move stopped" });
+        c.forget(sid);
+        const there = claudes.get(to.id);
+        if (there && !there.busy()) claudes.delete(to.id);   // read again on its next use, with the chat that came
+        broadcast("video", { id });
+        withProfile(to.id, () => broadcast("video", { id }));
+        return sendJson(res, 200, { ok: true, to: to.id, log: out.out.trim() });
       }
       if ((action === "delete" || action === "trash") && m === "POST") {
         // Recently deleted (Undo, Restore), never rm. Its raw take goes too when it was added into the library.
-        if (jobs.has(id)) return sendJson(res, 409, { error: "it is being rebuilt; try again in a moment" });
+        if (jobs.has(jk(id))) return sendJson(res, 409, { error: "it is being rebuilt; try again in a moment" });
         const r = lib.record(id);
-        if (r.session) claude.stop(r.session);
+        if (r.session) claude().stop(r.session);
         const own = [...new Set([r.source, ...(r.files ?? []).filter((c) => c.kind !== "broll").map((c) => c.path)])]
-          .filter((f): f is string => !!f && path.resolve(f).startsWith(VIDEOS + path.sep));
+          .filter((f): f is string => !!f && path.resolve(f).startsWith(VIDEOS() + path.sep));
         const d = bin.trash("video", id, r.title, [lib.editDir(id), ...own]);
         broadcast("video", { id });
         return sendJson(res, 200, d);
@@ -469,7 +666,7 @@ const server = http.createServer(async (req, res) => {
     if (seg[0] === "api" && seg[1] === "chat" && seg[2]) {
       const sid = seg[2], action = seg[3];
       if (!action && m === "GET") {
-        const s = claude.get(sid) ?? (sid === "studio" ? claude.ensure("studio", "Studio") : undefined);
+        const s = claude().get(sid) ?? (sid === "studio" ? claude().ensure("studio", "Studio") : undefined);
         // A conversation that has not started yet reads as an empty one (it is made on the first message).
         return sendJson(res, 200, s ?? { id: sid, title: "", status: "idle", events: [] });
       }
@@ -477,7 +674,7 @@ const server = http.createServer(async (req, res) => {
       // A file for the next message: the body is the file itself (x-filename), kept in <library>/attachments/<chat>/
       if (action === "attach" && m === "POST") {
         const name = path.basename(decodeURIComponent(String(req.headers["x-filename"] ?? "file"))).replace(/[^\p{L}\p{N}._ -]+/gu, "_").slice(-120) || "file";
-        const dir = path.join(LIBRARY, "attachments", path.basename(sid));
+        const dir = path.join(LIBRARY(), "attachments", path.basename(sid));
         mkdirSync(dir, { recursive: true });
         const f = path.join(dir, `${Date.now()}-${name}`);
         await new Promise<void>((resolve, reject) => { const w = createWriteStream(f); req.pipe(w); w.on("finish", resolve); w.on("error", reject); });
@@ -488,20 +685,20 @@ const server = http.createServer(async (req, res) => {
       const b = m === "POST" ? await body(req) : {};
       if (action === "send") {
         const edit = b.edit ? lib.editDir(String(b.edit)) : undefined;
-        const s = claude.ensure(sid, b.title ?? "Studio", edit);
+        const s = claude().ensure(sid, b.title ?? "Studio", edit);
         const ctx = edit ? `(The user is on the page of the video in ${edit}${typeof b.at === "number" ? `, at ${b.at.toFixed(1)} s` : ""}.)\n\n` : "";
         // only files this chat attached (POST attach): a path from anywhere else is ignored
-        const own = path.join(LIBRARY, "attachments", path.basename(sid));
+        const own = path.join(LIBRARY(), "attachments", path.basename(sid));
         const files = (Array.isArray(b.files) ? b.files : []).filter((f: { path?: string }) => typeof f?.path === "string" && path.resolve(f.path).startsWith(own + path.sep) && existsSync(f.path))
           .map((f: { name?: string; path: string; url?: string; kind?: string }) => ({ name: String(f.name ?? path.basename(f.path)), path: f.path, url: String(f.url ?? ""), kind: (["image", "video"].includes(String(f.kind)) ? f.kind : "file") as "image" | "video" | "file" }));
-        claude.send(s.id, String(b.text ?? ""), ctx + String(b.text ?? ""), files);
+        claude().send(s.id, String(b.text ?? ""), ctx + String(b.text ?? ""), files);
         return sendJson(res, 202, { ok: true });
       }
-      if (action === "answer") { claude.answer(sid, b.event, b.answers ?? {}); return sendJson(res, 200, { ok: true }); }
-      if (action === "permit") { claude.permit(sid, b.event, !!b.allow, !!b.always); return sendJson(res, 200, { ok: true }); }
-      if (action === "stop") { claude.stop(sid); return sendJson(res, 200, { ok: true }); }
+      if (action === "answer") { claude().answer(sid, b.event, b.answers ?? {}); return sendJson(res, 200, { ok: true }); }
+      if (action === "permit") { claude().permit(sid, b.event, !!b.allow, !!b.always); return sendJson(res, 200, { ok: true }); }
+      if (action === "stop") { claude().stop(sid); return sendJson(res, 200, { ok: true }); }
     }
-    if (p === "/api/chats") return sendJson(res, 200, claude.list());
+    if (p === "/api/chats") return sendJson(res, 200, claude().list());
 
     // Recently deleted: videos, demos and scripts, restored as they were or handed to the Mac's Trash.
     if (p === "/api/trash" && m === "GET") return sendJson(res, 200, bin.list());
@@ -525,15 +722,15 @@ const server = http.createServer(async (req, res) => {
       const id = scripts.newScript(text, b.title);
       const sid = `s_${id}`;
       const mt = scripts.meta(id); mt.session = sid; scripts.saveMeta(id, mt);
-      claude.ensure(sid, mt.title, scripts.scriptDir(id));
-      claude.send(sid, "Check the facts in this script.", scripts.prompt(id));
+      claude().ensure(sid, mt.title, scripts.scriptDir(id));
+      claude().send(sid, "Check the facts in this script.", scripts.prompt(id));
       broadcast("script", { id });
       return sendJson(res, 201, { id, session: sid });
     }
     if (seg[0] === "api" && seg[1] === "scripts" && seg[2] && seg[3] === "delete" && m === "POST") {
       if (!existsSync(scripts.scriptDir(seg[2]))) return sendJson(res, 404, { error: "no such script" });
       const mt = scripts.meta(seg[2]);
-      if (mt.session) claude.stop(mt.session);
+      if (mt.session) claude().stop(mt.session);
       const d = bin.trash("script", seg[2], mt.title, [scripts.scriptDir(seg[2])]);
       broadcast("script", { id: seg[2] });
       return sendJson(res, 200, d);
@@ -546,7 +743,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (seg[0] === "api" && seg[1] === "scripts" && seg[2] && m === "GET") {
       if (!existsSync(scripts.scriptDir(seg[2]))) return sendJson(res, 404, { error: "no such script" });
-      const d = scripts.detail(seg[2]), c = d.session ? claude.get(d.session) : undefined;
+      const d = scripts.detail(seg[2]), c = d.session ? claude().get(d.session) : undefined;
       return sendJson(res, 200, { ...d, chat: c ? { id: c.id, status: c.status } : null });
     }
 
@@ -566,8 +763,8 @@ const server = http.createServer(async (req, res) => {
       const id = demos.newDemo({ title, url, show, formats });
       const sid = `d_${id}`;
       const br = demos.brief(id); br.session = sid; demos.saveBrief(id, br);
-      claude.ensure(sid, br.title, demos.demoDir(id));
-      claude.send(sid, `Record a demo of ${url}: ${show}`, demos.prompt(id));
+      claude().ensure(sid, br.title, demos.demoDir(id));
+      claude().send(sid, `Record a demo of ${url}: ${show}`, demos.prompt(id));
       broadcast("demo", { id });
       return sendJson(res, 201, { id, session: sid });
     }
@@ -575,7 +772,7 @@ const server = http.createServer(async (req, res) => {
       const id = seg[2];
       if (!existsSync(demos.demoDir(id))) return sendJson(res, 404, { error: "no such demo" });
       if (!seg[3] && m === "GET") {
-        const s = demos.summary(id), c = s.session ? claude.get(s.session) : undefined;
+        const s = demos.summary(id), c = s.session ? claude().get(s.session) : undefined;
         return sendJson(res, 200, { ...s, chat: c ? { id: c.id, status: c.status } : null });
       }
       if (seg[3] === "reveal" && m === "POST") { spawn("open", [demos.demoDir(id)], { stdio: "ignore", detached: true }).unref(); return sendJson(res, 200, { ok: true }); }
@@ -597,7 +794,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (seg[3] === "delete" && m === "POST") {
         const br = demos.brief(id);
-        if (br.session) claude.stop(br.session);
+        if (br.session) claude().stop(br.session);
         const d = bin.trash("demo", id, br.title, [demos.demoDir(id)]);
         broadcast("demo", { id });
         return sendJson(res, 200, d);
@@ -660,14 +857,47 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/styles") {
       const styles = await py<{ handle: string; style: Record<string, unknown> }[]>(`from mm import library\nprint(json.dumps([{"handle": h, "style": s} for h, s in library.styles()]))`);
+      // the other profiles' own styles, to borrow (copied into this profile's styles: library.borrow)
+      const others = await py<{ pid: string; profile: string; handle: string; style: Record<string, unknown>; dir: string }[]>(
+        `from mm import library\nprint(json.dumps([{"pid": p["id"], "profile": p["name"], "handle": h, "style": s, "dir": str(d)} for p, h, s, d in library.others()]))`);
+      const coverOf = (dir: string) => ["cover.jpg", "thumb.jpg"].map((f) => path.join(dir, f)).find((f) => existsSync(f));
+      const fileUrl = (f: string | undefined) => (f ? `/library-file/${path.relative(ROOT, f).split(path.sep).map(encodeURIComponent).join("/")}` : undefined);
       const taste = await runScript([path.join(PLUGIN, "skills", "taste", "scripts", "taste.py"), "show"]);
       const learned = await runScript([path.join(PLUGIN, "skills", "taste", "scripts", "taste.py"), "get"]);
       let settings: unknown = {};
       try { settings = JSON.parse(learned.out || "{}"); } catch { /* none yet */ }
       return sendJson(res, 200, {
-        styles: styles.map(({ handle, style: s }) => ({ handle, name: s.name ?? handle, about: s.about, format: s.format, aspect: s.aspect, sample: !!s.sample, layout: (s.layout as { mode?: string })?.mode, motion: s.motion, captions: s.captions, zoom: s.zoom, cover: existsSync(path.join(LIBRARY, "creator-teardowns", handle, "cover.jpg")) ? `/library-file/creator-teardowns/${encodeURIComponent(handle)}/cover.jpg` : existsSync(path.join(LIBRARY, "creator-teardowns", handle, "thumb.jpg")) ? `/library-file/creator-teardowns/${encodeURIComponent(handle)}/thumb.jpg` : undefined })),
+        styles: styles.map(({ handle, style: s }) => ({ handle, name: s.name ?? handle, about: s.about, format: s.format, aspect: s.aspect, sample: !!s.sample, own: s.owner === true, layout: (s.layout as { mode?: string })?.mode, motion: s.motion, captions: s.captions, zoom: s.zoom, cover: fileUrl(coverOf(path.join(LIBRARY(), "creator-teardowns", handle)) ?? coverOf(path.join(ROOT, "creator-teardowns", handle))) })),
+        others: others.map((o) => ({ pid: o.pid, profile: o.profile, handle: o.handle, name: o.style.name ?? o.handle, about: o.style.about,
+          own: o.style.owner === true, cover: fileUrl(coverOf(o.dir)) })),
         taste: { text: taste.out.split(/\n\{\n/)[0]!.trim(), settings },
       });
+    }
+    // the profile's re-measured style, waiting to be used (refreshStyles): what changed, and use it or keep the old
+    if (p === "/api/style-update" && m === "GET") {
+      const pr = profile(), own = pr ? ownStyle() : null;
+      const dir = pr && own ? path.join(prof.folder(pr), "creator-teardowns", own) : "";
+      if (!dir || !existsSync(path.join(dir, "style.next.json"))) return sendJson(res, 200, null);
+      return sendJson(res, 200, { handle: own, change: (() => { try { return readFileSync(path.join(dir, "style.change.md"), "utf8"); } catch { return ""; } })() });
+    }
+    if (p === "/api/style-update" && m === "POST") {
+      const b = await body(req), pr = profile(), own = pr ? ownStyle() : null;
+      const dir = pr && own ? path.join(prof.folder(pr), "creator-teardowns", own) : "";
+      if (!dir || !existsSync(path.join(dir, "style.next.json"))) return sendJson(res, 404, { error: "no new style waiting" });
+      if (b.use) {   // the old one kept beside it; edits made before keep their own copy of the style anyway
+        copyFileSync(path.join(dir, "style.json"), path.join(dir, `style.${new Date().toISOString().slice(0, 10)}.json`));
+        copyFileSync(path.join(dir, "style.next.json"), path.join(dir, "style.json"));
+      }
+      for (const f of ["style.next.json", "style.change.md", "style.prev.json"]) rmSync(path.join(dir, f), { force: true });
+      return sendJson(res, 200, { ok: true });
+    }
+    if (p === "/api/styles/borrow" && m === "POST") {   // another profile's style, copied into this one's
+      const b = await body(req);
+      const o = prof.byId(String(b.pid ?? ""));
+      const dir = o ? path.join(prof.folder(o), "creator-teardowns", path.basename(String(b.handle ?? ""))) : "";
+      if (!o || !existsSync(path.join(dir, "style.json"))) return sendJson(res, 404, { error: "that style is not there any more" });
+      const got = await py<{ handle: string }>(`from mm import library\nprint(json.dumps({"handle": library.borrow(${JSON.stringify(dir)}).name}))`);
+      return sendJson(res, 200, got);
     }
     // the library's b-roll: what New video saved, what was added here, and any clip put in the folder by hand
     if (p === "/api/broll" && m === "GET") return sendJson(res, 200, clipsMod.brollList());
@@ -700,9 +930,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/library" && m === "GET") {
       const disk = await py<{ library: number; working: number; free: number }>(`from mm import library\nprint(json.dumps(library.disk()))`);
-      const edits = await py<{ id: string; bytes: number }[]>(`from mm import library\nfrom pathlib import Path\nd = Path(${JSON.stringify(EDITS)})\nprint(json.dumps([{"id": e.name, "bytes": library.size(e)} for e in sorted(d.iterdir()) if e.is_dir() and not e.name.startswith(".")] if d.is_dir() else []))`);
+      const edits = await py<{ id: string; bytes: number }[]>(`from mm import library\nfrom pathlib import Path\nd = Path(${JSON.stringify(EDITS())})\nprint(json.dumps([{"id": e.name, "bytes": library.size(e)} for e in sorted(d.iterdir()) if e.is_dir() and not e.name.startswith(".")] if d.is_dir() else []))`);
       const titles = new Map(lib.list().map((v) => [v.id, v.title]));
-      return sendJson(res, 200, { path: LIBRARY, home: HOME, disk, edits: edits.map((e) => ({ ...e, title: titles.get(e.id) ?? e.id })).sort((a, b) => b.bytes - a.bytes) });
+      return sendJson(res, 200, { path: LIBRARY(), home: HOME, disk, edits: edits.map((e) => ({ ...e, title: titles.get(e.id) ?? e.id })).sort((a, b) => b.bytes - a.bytes) });
     }
     if (p === "/api/library/clean" && m === "POST") {
       const r = await py<{ files: number; bytes: number }>(`from mm import library\nfs, n = library.clean(yes=True)\nprint(json.dumps({"files": len(fs), "bytes": n}))`);
@@ -716,14 +946,22 @@ const server = http.createServer(async (req, res) => {
         spawn("open", ["-R", f], { stdio: "ignore", detached: true }).unref();
         return sendJson(res, 200, { ok: true });
       }
-      const target = b.id ? lib.editDir(String(b.id)) : LIBRARY;
+      if (b.exports) {   // the profile's export folder, made when it is not there yet
+        const d = exportBase();
+        if (!d) return sendJson(res, 400, { error: "no profile" });
+        mkdirSync(d, { recursive: true });
+        spawn("open", [d], { stdio: "ignore", detached: true }).unref();
+        return sendJson(res, 200, { ok: true });
+      }
+      const target = b.id ? lib.editDir(String(b.id)) : LIBRARY();
       if (!existsSync(target)) return sendJson(res, 404, { error: "not there any more" });
       spawn("open", [target], { stdio: "ignore", detached: true }).unref();
       return sendJson(res, 200, { ok: true });
     }
     if (seg[0] === "library-file" && seg.length >= 3) {
-      const f = path.join(LIBRARY, ...seg.slice(1));
-      if (!f.startsWith(LIBRARY + path.sep) || seg.some((x) => x === "..")) { res.writeHead(400).end(); return; }
+      if (seg.some((x) => x === "..")) { res.writeHead(400).end(); return; }
+      const f = [path.join(LIBRARY(), ...seg.slice(1)), path.join(ROOT, ...seg.slice(1))].find((x) => existsSync(x)) ?? path.join(LIBRARY(), ...seg.slice(1));
+      if (!f.startsWith(ROOT + path.sep)) { res.writeHead(400).end(); return; }
       return sendFile(req, res, f);
     }
 
@@ -740,36 +978,36 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     sendJson(res, 500, { error: (e as Error).message });
   }
-});
+}
 
-// Anything the scripts write into an edit (progress, a new cut) reaches the open pages.
+// Anything the scripts write into an edit (progress, a new cut) reaches the open pages: the library's top is watched, and
+// each change goes out as the profile whose folder it is in (the shared recordings and b-roll to every page).
 try {
   const pending = new Map<string, NodeJS.Timeout>();
-  watch(EDITS, { recursive: true }, (_ev, f) => {
-    const id = String(f ?? "").split(path.sep)[0];
+  const later = (key: string, ms: number, fn: () => void) => { clearTimeout(pending.get(key)); pending.set(key, setTimeout(fn, ms)); };
+  mkdirSync(ROOT, { recursive: true });
+  watch(ROOT, { recursive: true }, (_ev, f) => {
+    const parts = String(f ?? "").split(path.sep).filter(Boolean);
+    if (!parts.length || parts[0]!.startsWith(".")) return;
+    if (parts[0] === "recordings") {
+      const id = parts[1];
+      if (id && !id.startsWith(".") && !String(f).includes(`${path.sep}frames${path.sep}`)) later(`demo/${id}`, 300, () => broadcast("demo", { id, profile: null }));
+      return;
+    }
+    if (parts[0] === "broll") { if (parts[1] && !parts[1].startsWith(".")) later("broll", 300, () => broadcast("broll", { profile: null })); return; }
+    const owner = profiles().find((p) => p.folder === parts[0]);
+    const rest = owner ? parts.slice(1) : profiles().length ? null : parts;   // without profiles the top is the library
+    if (!rest) return;
+    const pid = owner?.id ?? null, id = rest[1];
     if (!id || id.startsWith(".")) return;
-    clearTimeout(pending.get(id));
-    pending.set(id, setTimeout(() => broadcast("video", { id }), 250));
+    if (rest[0] === "edits") later(`v/${pid}/${id}`, 250, () => withProfile(pid, () => broadcast("video", { id })));
+    else if (rest[0] === "scripts") later(`s/${pid}/${id}`, 250, () => withProfile(pid, () => broadcast("script", { id })));
   });
-  const pendingDemo = new Map<string, NodeJS.Timeout>();
-  watch(RECORDINGS, { recursive: true }, (_ev, f) => {
-    const id = String(f ?? "").split(path.sep)[0];
-    if (!id || id.startsWith(".") || String(f).includes(`${path.sep}frames${path.sep}`)) return;
-    clearTimeout(pendingDemo.get(id));
-    pendingDemo.set(id, setTimeout(() => broadcast("demo", { id }), 300));
-  });
-  mkdirSync(scripts.SCRIPTS, { recursive: true });
-  watch(scripts.SCRIPTS, { recursive: true }, (_ev, f) => {
-    const id = String(f ?? "").split(path.sep)[0];
-    if (id && !id.startsWith(".")) broadcast("script", { id });
-  });
-  mkdirSync(clipsMod.BROLL, { recursive: true });
-  watch(clipsMod.BROLL, (_ev, f) => { if (f && !String(f).startsWith(".")) broadcast("broll", {}); });
   const prog = path.join(HOME, "progress");
   mkdirSync(prog, { recursive: true });
   watch(prog, () => broadcast("setup", {}));
 } catch { /* no recursive watch: the page polls */ }
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`motionmaxxing studio: http://localhost:${PORT}  (library ${LIBRARY})`);
+  console.log(`motionmaxxing studio: http://localhost:${PORT}  (library ${ROOT}${profiles().length ? `, profiles ${profiles().map((p) => p.name).join(", ")}` : ""})`);
 });

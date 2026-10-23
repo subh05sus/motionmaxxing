@@ -6,6 +6,12 @@ The rules every skill follows. Each names where it is enforced.
 
 - Work in the library (`lib/mm/library.py path`, `~/Movies/motionmaxxing`) or a folder the user names. Never in the
   code folder, never anything private in it. (`library.py`)
+- A library can hold profiles, one creator each (`lib/mm/profiles.py`): `library.py path` is then the profile's own
+  folder (its videos, styles, scripts, chats, taste and settings), while the b-roll, demo recordings, sample styles and
+  sounds stay shared at the top. The studio sets `MM_PROFILE` on everything it runs. Outside the studio, ask which
+  profile every time: when a script stops with "This library has profiles: ... Which one is this for?", ask in the
+  question box (one option per profile) and run every command after that with `MM_PROFILE=<id>` in front.
+  (`profiles.py active`)
 - Everything runs on this Mac, on the user's own Claude login. No API keys, no paid services: transcription is
   whisper.cpp on the GPU, looking at frames is Claude. Free stock libraries take a free key in Settings.
 - German, English, Hindi and Hinglish: anything that reads speech goes through `lib/mm/lang.py` (fillers, restarts,
