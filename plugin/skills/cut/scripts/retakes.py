@@ -4,6 +4,7 @@
     python3 retakes.py text    <edit_dir>              transcript.txt, one line per phrase
     python3 retakes.py propose <edit_dir>              transcript.txt + candidates.md
     python3 retakes.py fix     <edit_dir> cloud=Claude [haiku=Haiku ...]   fix misheard words
+    python3 retakes.py line    <edit_dir> 219.5-220.3 "Taaki tumhe docs na padhna padhe"   a caption line as said
     python3 retakes.py captions <edit_dir>             captions.json + captions.txt for edit
     python3 retakes.py hook    <edit_dir> <n>          <edit_dir>-hook<n>/: the cut opening on alternate hook n
     python3 retakes.py remap   <edit_dir>              re-point visuals built before a re-cut
@@ -462,6 +463,34 @@ def fix(d, pairs):
     return n
 
 
+def say_line(words, a, b, text):
+    """The caption words said between a and b (seconds, by their middles) as `text` instead: a line Whisper wrote as an
+    English translation of the Hindi said ("So that you don't have to do that" for "Taaki tumhe docs na padhna
+    padhe"), or got wrong as a whole. The new words share the old ones' time by letters. -> (words, the old text)."""
+    inside = [i for i, w in enumerate(words) if w.get("type", "word") == "word" and a <= (w["start"] + w["end"]) / 2 <= b]
+    if not inside or not text.strip():
+        return words, ""
+    i0, i1 = inside[0], inside[-1]
+    old = " ".join(w["text"] for w in words[i0:i1 + 1] if w.get("type", "word") == "word")
+    tok = {**words[i0], "text": text.strip(), "start": words[i0]["start"], "end": words[i1]["end"]}
+    return words[:i0] + one_word_each([tok]) + words[i1 + 1:], old
+
+
+def line(d, a, b, text):
+    """say_line on captions.json, kept in fixes.json ("lines") for every later captions run. -> the old text."""
+    d = Path(d)
+    fj, cj = d / "fixes.json", d / "captions.json"
+    kept = json.loads(fj.read_text(encoding="utf-8")) if fj.exists() else {}
+    kept["lines"] = [x for x in kept.get("lines", []) if not (x["start"] == a and x["end"] == b)] + [{"start": a, "end": b, "text": text}]
+    fj.write_text(json.dumps(kept, indent=1, ensure_ascii=False), encoding="utf-8")
+    if not cj.exists():
+        return ""
+    words, old = say_line(json.loads(cj.read_text(encoding="utf-8")), a, b, text)
+    cj.write_text(json.dumps(words, indent=1, ensure_ascii=False), encoding="utf-8")
+    (d / "captions.txt").write_text(text_view(words, "captions", "A misheard word: retakes.py fix <edit_dir> old=new."), encoding="utf-8")
+    return old
+
+
 def one_word_each(toks):
     """A token holding several words ("use." corrected to "are using.") becomes one token per word, the
     original's time shared by letter count, so a caption never renders it as one word ("areusing")."""
@@ -549,13 +578,16 @@ def caption_words(heard, cut, names=(), fixes=None, roman=False, script=None):
             w["text"] = w["text"].replace(core, new, 1)
     spell = {n.lower(): n for n in names}
     for w in hw:
-        for old, new in (fixes or {}).items():
+        for old, new in ((k, v) for k, v in (fixes or {}).items() if isinstance(v, str)):   # "lines": whole lines, below
             w["text"] = swap(w["text"], old, new)
         core = strip(w["text"])
         if core.lower() in spell:
             w["text"] = w["text"].replace(core, spell[core.lower()], 1)
     changed = [(a, w["text"]) for a, w in zip(was, hw) if a != w["text"]]
-    return one_word_each([w for w in hw if w["text"].strip()]), changed
+    out = one_word_each([w for w in hw if w["text"].strip()])
+    for ln in (fixes or {}).get("lines", []):   # retakes.py line: a whole line as said
+        out, _ = say_line(out, ln["start"], ln["end"], ln["text"])
+    return out, changed
 
 
 def captions(d):
@@ -631,7 +663,7 @@ def remap(d):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["text", "propose", "fix", "captions", "hook", "remap"])
+    ap.add_argument("cmd", choices=["text", "propose", "fix", "line", "captions", "hook", "remap"])
     ap.add_argument("edit_dir")
     ap.add_argument("pairs", nargs="*", help="fix: old=new; hook: the alternate's number")
     a = ap.parse_args()
@@ -647,6 +679,12 @@ def main():
         if not pairs:
             sys.exit("usage: retakes.py fix <edit_dir> old=new [old=new ...]")
         print(f"{fix(d, pairs)} token(s) changed")
+    elif a.cmd == "line":
+        m = re.fullmatch(r"([\d.]+)-([\d.]+)", a.pairs[0]) if a.pairs else None
+        if not m or len(a.pairs) < 2:
+            sys.exit('usage: retakes.py line <edit_dir> <start>-<end> "the line as said"')
+        old = line(d, float(m.group(1)), float(m.group(2)), " ".join(a.pairs[1:]))
+        print(f"was: {old or '(no caption words there)'}\nnow: {' '.join(a.pairs[1:])}")
     elif a.cmd == "hook":
         if not a.pairs or not a.pairs[0].isdigit():
             sys.exit("usage: retakes.py hook <edit_dir> <n>")

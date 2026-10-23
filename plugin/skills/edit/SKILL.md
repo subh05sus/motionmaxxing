@@ -89,7 +89,13 @@ The edit's language (`meta.json` "lang") sets the script captions are written in
 - **Hinglish:** `captions` writes each Hindi word in Roman letters the way Hinglish is written (आज aaj, करना karna,
   नहीं nahi, ज़रूरत zaroorat), so captions.txt reads "Laatap ki zaroorat nahi hai." Proofread it for spellings a
   Hinglish viewer would stumble on and fix them in Roman letters, a word at a time (`fix edits/<name> Laatap=Laptop
-  usi=use`): the common spelling ("hai", "nahi", "kaise", "bhai"), never another word.
+  usi=use`): the common spelling ("hai", "nahi", "kaise", "bhai"), never another word. With a script, captions already
+  take its spellings where it says the same word.
+- **Hindi and Hinglish, a whole line:** after English sentences Whisper can write a Hindi line as its English
+  translation ("So that you don't have to do that" for "Taaki tumhe docs na padhna padhe"). Read captions.txt against
+  the script and the sound, and set such a line right as said:
+  `python3 "${CLAUDE_PLUGIN_ROOT}/skills/cut/scripts/retakes.py" line edits/<name> 219.5-220.3 "Taaki tumhe docs na padhna padhe"`
+  (its words share the line's time; kept in fixes.json for every later captions run).
 
 The captions' fonts draw Devanagari (the caption font's own, else Noto Sans Devanagari behind it), and so do the
 motion clips: text on screen in Hindi is set as it is, never in Latin letters to dodge the font.

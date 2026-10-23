@@ -200,6 +200,15 @@ def test_hinglish_captions_are_in_roman_letters():
         heard2 = [w("घर", 0.0, 0.3), w("बन", 0.35, 0.5), w("जाएगा।", 0.5, 0.9), w("पढ़ी", 1.0, 1.3)]
         words, _ = R.caption_words(heard2, heard2, roman=True, script=sp)
         assert " ".join(x["text"] for x in words) == "Ghar ban jayega. Padhi", words
+        # a line Whisper wrote as an English translation, set right as a whole: its time shared by the new words, and
+        # kept for the next captions run
+        tr = [w("So", 10.0, 10.2), w("that", 10.2, 10.4), w("you", 10.4, 10.5), w("don't", 10.5, 10.8), w("have", 10.8, 11.0),
+              w("to", 11.0, 11.1), w("do", 11.1, 11.3), w("that.", 11.3, 11.7), w("Pehla", 12.0, 12.3)]
+        got, was = R.say_line(tr, 10.0, 11.7, "Taaki tumhe docs na padhna padhe.")
+        assert was.startswith("So that") and [x["text"] for x in got][:6] == "Taaki tumhe docs na padhna padhe.".split(), got
+        assert got[0]["start"] == 10.0 and got[5]["end"] == 11.7 and got[6]["text"] == "Pehla", got
+        words, _ = R.caption_words(tr, tr, fixes={"lines": [{"start": 10.0, "end": 11.7, "text": "Taaki tumhe docs na padhna padhe."}]})
+        assert " ".join(x["text"] for x in words) == "Taaki tumhe docs na padhna padhe. Pehla", words
         assert R.swap("लाटाप,", "लाटाप", "लैपटॉप") == "लैपटॉप,"
     finally:
         R.use_lang("en")

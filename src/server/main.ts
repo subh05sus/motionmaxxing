@@ -116,12 +116,15 @@ function langLine(code: string | undefined, stage: "cut" | "edit"): string[] {
       ...(code === "hi" || code === "hinglish" ? ["  Hindi comes back in Devanagari and English words in Latin letters, and a word can come back in either:",
         "  the cut compares words by sound, so a retake in the other script still matches its first try."] : [])];
   }
+  const whole = ["  Whisper can write a Hindi line as its English translation after English sentences: read captions.txt against the",
+    "  script and set such a line right as said with retakes.py line <edit> <start>-<end> \"the line\"."];
   if (code === "hi") return ["- The video is Hindi: captions in Devanagari, the user's words exactly, English words in Latin letters as Whisper",
     "  wrote them (only spelling fixes with retakes.py fix). Text on screen as the speaker would write it: Hindi in Devanagari,",
-    "  names and English terms in Latin letters (the captions and the kit carry a Devanagari font)."];
-  if (code === "hinglish") return ["- The video is Hinglish: retakes.py captions writes its Hindi words in Roman letters (aaj, karna, nahi). Read",
-    "  captions.txt and fix a spelling that reads oddly with retakes.py fix, to the common Hinglish spelling (\"hai\", \"nahi\",",
-    "  \"kaise\", \"bhai\"): never change a word. Text on screen in Roman letters, Hinglish or English."];
+    "  names and English terms in Latin letters (the captions and the kit carry a Devanagari font).", ...whole];
+  if (code === "hinglish") return ["- The video is Hinglish: retakes.py captions writes its Hindi words in Roman letters (aaj, karna, nahi), in the",
+    "  script's own spelling where it has one. Read captions.txt and fix a spelling that reads oddly with retakes.py fix, to",
+    "  the common Hinglish spelling (\"hai\", \"nahi\", \"kaise\", \"bhai\"): never change a word. Text on screen in Roman letters,",
+    "  Hinglish or English.", ...whole];
   return [`- The video is ${name ?? "German"}: captions keep the user's words exactly (only spelling fixes with retakes.py fix).`,
     `  Text on screen in ${name ?? "German"}.`];
 }
