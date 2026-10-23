@@ -141,7 +141,8 @@ def zoom_state(t, zooms):
             p = sine((t - z["start"]) / e) if t < z["start"] + e else sine((z["end"] - t) / e) if t > z["end"] - e else 1
         else:
             p = out2(min(1, (t - z["start"]) / travel)) if t < z["end"] else 1 - out2(min(1, (t - z["end"]) / travel))
-        return z["scale"] ** max(0.0, min(1.0, p)), tuple(z.get("origin") or ZOOM_ORIGIN)
+        q = max(0.0, min(1.0, p))
+        return z.get("from", 1.0) ** (1 - q) * z["scale"] ** q, tuple(z.get("origin") or ZOOM_ORIGIN)
     return 1.0, ZOOM_ORIGIN
 
 
@@ -222,7 +223,11 @@ def on_screen(box, t, plan):
         c0 = min(slack, max(0, lay.get("head_x", 50) - 50 / z))
         start = c0 + (0 - c0) * sd if sd >= 0 else c0 + (slack - c0) * -sd
         return [(x - start) * z, y * z, w * z, h * z]
-    if not lay:
+    # StyleEdit.tsx: a shut panel (o === 0) is the whole frame. A face sample half a second before a panel opens is read
+    # as the panel draws it: the head checks take the sample before a card (head_during) as part of it.
+    if lay.get("mode") == "split" and panel_at(t, plan) <= 0 < panel_at(t + 0.5, plan):
+        return on_screen(box, t + 0.5, plan)
+    if not lay or (lay.get("mode") == "split" and panel_at(t, plan) <= 0):
         ox, oy = zoom_state(t, plan["zooms"])[1]
         px, pk = pan_at(t, plan.get("pans"))
         s *= pk
@@ -370,7 +375,10 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
             out.append(finding("FAIL", c["start"], f"{name} card centre at {x + w / 2:.1f}% of the width, not 50",
                                "drop its box x in visuals.json/images.json so plan.py centres it"))
         if heads:
-            hd = head_during(heads, step, c["start"], c["end"])
+            # a face sample just before the card is read as the frame is drawn at the card's start (a panel may still
+            # have been open then, with the speaker lowered in it)
+            hd = head_during([{"t": h["t"], "box": on_screen(h["box"], max(h["t"], c["start"]), plan) if h["box"] else None}
+                              for h in (face or {}).get("heads", [])], step, c["start"], c["end"])
             if hd and x < hd[2] and x + w > hd[0] and y < hd[3] and y + h > hd[1]:
                 out.append(finding("FAIL", c["start"], f"{name} card covers the head "
                                    f"(head {hd[1]:.0f}-{hd[3]:.0f}% down, card {y:.0f}-{y + h:.0f}%)",
@@ -408,8 +416,8 @@ def check_plan(plan, face=None, cuts=(), static_s=STATIC_S, visuals=None, brand=
         else lay["caption_full_y"]
     for ch in plan["captions"]["chunks"] if aspect == "9:16" and lay.get("mode") != "letterbox" else ():
         t = (ch["start"] + ch["end"]) / 2
-        if any(c.get("layout") == "scene" and c["start"] <= t < c["end"] for c in cards):
-            continue   # the speaker is not in the frame (a scene). Before a picture (background) he still is: his cutout
+        if any((c.get("layout") == "scene" or c.get("layer") == "cutaway") and c["start"] <= t < c["end"] for c in cards):
+            continue   # the speaker is not in the frame (a scene, a cutaway). Before a picture (background) he still is: his cutout
         panel_up = panel_at(t, plan) >= 0.5
         y = cap.get("y_pct") if panel_up or "caption_full_y" not in lay else lay["caption_full_y"]
         if y is None:

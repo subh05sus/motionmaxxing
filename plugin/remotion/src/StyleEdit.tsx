@@ -30,7 +30,7 @@ import { BoardFrame, BoardLayout } from "./Board";
 // Shapes follow skills/edit/references/contracts.md "plan.json". Times are seconds on the cut's timeline.
 // origin: the top centre of the head over the zoom, % of the frame (plan.py from face.json): the face holds its place, the hair never rises into a card.
 type Zoom = { start: number; end: number; scale: number; kind: "punch" | "push"; ease_s: number; ease?: string; origin?: [number, number];
-  travel_s?: number };
+  travel_s?: number; from?: number };   // from: the scale it moves in from (default 1x), so one framing can move into the next
 // A slow sideways drift of the footage (the creator's camera.pan_per_min): from -> to, % of the width.
 type Pan = { start: number; end: number; from: number; to: number };
 export type Card = {
@@ -161,7 +161,8 @@ export const zoomAt = (t: number, zooms: Zoom[]): { k: number; origin: string } 
       const f = ease(z.ease && z.ease !== "none" ? z.ease : PUNCH_EASE);
       p = t < z.end ? f(Math.min(1, (t - z.start) / travel)) : 1 - f(Math.min(1, (t - z.end) / travel));
     }
-    return { k: Math.pow(z.scale, Math.max(0, Math.min(1, p))), origin };
+    const q = Math.max(0, Math.min(1, p));
+    return { k: Math.pow(z.from ?? 1, 1 - q) * Math.pow(z.scale, q), origin };
   }
   return { k: 1, origin: ZOOM_ORIGIN };
 };
@@ -359,7 +360,9 @@ const LetterboxView: React.FC<Letterbox & { video: string; captions: Plan["capti
 const Backdrop: React.FC<{ card: Card; t: number; top: number }> = ({ card, t, top }) => {
   const { fps, width, height } = useVideoConfig();
   const FADE = 0.35;
-  const a = Math.max(0, Math.min(1, (t - card.start) / FADE, (card.end - t) / FADE));
+  // props.fade === 0: a clip that carries its own way in and out (its first and last frames are the footage under it)
+  const noFade = (card.anim?.props as { fade?: number } | undefined)?.fade === 0;
+  const a = noFade ? (t >= card.start && t < card.end ? 1 : 0) : Math.max(0, Math.min(1, (t - card.start) / FADE, (card.end - t) / FADE));
   const p = Math.max(0, Math.min(1, (t - card.start) / Math.max(0.1, card.end - card.start)));
   // a motion clip (video_card) behind the speaker or as a cutaway: its file is in the card's props, played from start_s
   const clip = card.anim?.type === "video_card" ? (card.anim.props as { src?: string; start_s?: number } | undefined) : undefined;
