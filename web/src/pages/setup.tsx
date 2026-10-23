@@ -7,6 +7,7 @@ import type { PageProps } from "@/app";
 
 interface Row { name: string; ok: boolean; detail: string; fix: string | null }
 const WHAT: Record<string, string> = {
+  Claude: "Your Claude subscription: the studio's Claude runs on it, never an API key.",
   ffmpeg: "Cuts, joins and measures your video.",
   node: "Runs this studio and the renderer.",
   "whisper.cpp": "Writes down every word, on your Mac's graphics chip.",
@@ -46,7 +47,8 @@ export function SetupPage({ setTitle, onDone }: PageProps & { onDone: () => void
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-2"><span className="font-medium">{r.name}</span><span className="caption truncate">{r.ok ? r.detail : "needed"}</span></div>
                 <p className="caption">{WHAT[r.name] ?? ""}</p>
-                {!r.ok && r.fix && !r.fix.startsWith("brew install") && !r.fix.startsWith("python3") && <p className="mt-1 font-mono text-[11px] text-warning">{r.fix}</p>}
+                {!r.ok && r.name === "Claude" && <p className="mt-1 text-[12px] text-warning">Sign in once: in Terminal, in the motionmaxxing folder, run <span className="font-mono">bin/mm login</span>, then come back here.</p>}
+                {!r.ok && r.fix && r.name !== "Claude" && !r.fix.startsWith("brew install") && !r.fix.startsWith("python3") && <p className="mt-1 font-mono text-[11px] text-warning">{r.fix}</p>}
               </div>
             </li>
           ))}

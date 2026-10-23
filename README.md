@@ -22,17 +22,34 @@ German first: the cut knows German fillers ("äh", "ähm"), restarts ("warte", "
 
 ## Start
 
-On a Mac with [Claude Code](https://claude.com/claude-code) signed in, and Node 20 or newer:
+You need:
+
+- a Mac with [Homebrew](https://brew.sh), Node 20 or newer (`brew install node`) and Google Chrome (for demo
+  recordings)
+- a Claude plan that includes Claude Code (Pro or Max): the studio's Claude runs on it, never an API key
+- access to this repository: it is private, so ask the owner to invite your GitHub account
 
 ```bash
 git clone https://github.com/subh05sus/motionmaxxing && cd motionmaxxing
 npm install
+bin/mm login    # once: sign in to Claude in the browser window that opens
 bin/mm          # starts the studio and opens it: http://localhost:5199
-bin/mm app      # optional: motionmaxxing.app in ~/Applications, for the Dock
 ```
 
-The first run checks the Mac and installs what is missing in one click (ffmpeg, whisper.cpp, the editing tools, the
-transcription model, the renderer, the motion clip tools and the face and cutout models). Then drop a raw take on Home.
+The first time, the studio opens on its setup page. **Set up everything** installs what is missing, in the background:
+ffmpeg, whisper.cpp, the editing tools, the transcription model, the renderer, the motion clip tools and the face and
+cutout models (3.3 GB, once: under four minutes on a fast connection). Then drop a raw take on Home.
+
+| Command | What it does |
+|---|---|
+| `bin/mm` | Starts the studio if needed and opens it. |
+| `bin/mm start`, `stop`, `status`, `logs` | Starts it without opening a browser, stops it, says whether it runs, shows its log. |
+| `bin/mm login` | Signs in to Claude. |
+| `bin/mm doctor` | Lists what this Mac has and what it still needs. |
+| `bin/mm setup` | Installs what is missing, here in the terminal instead of on the setup page. |
+| `bin/mm app` | Puts motionmaxxing.app in ~/Applications, for the Dock. |
+
+To update: `git pull && npm install && bin/mm stop && bin/mm`.
 
 The studio:
 

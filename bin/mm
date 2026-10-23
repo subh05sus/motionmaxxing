@@ -2,8 +2,12 @@
 # motionmaxxing: open the studio (starting it when it is not running), or stop it.
 #
 #   mm            start the studio if needed and open it in the browser
+#   mm start      start it without opening the browser
 #   mm stop       stop the studio
 #   mm status     say whether it runs
+#   mm login      sign in to Claude once: the studio's Claude runs on your subscription (no API key)
+#   mm doctor     what this Mac has and what it still needs
+#   mm setup      install what is missing (the setup page's button, here in the terminal)
 #   mm app        put motionmaxxing.app in ~/Applications (for the Dock)
 #   mm logs       the studio's log
 set -euo pipefail
@@ -23,6 +27,12 @@ mkdir -p "$HOME_DIR/studio"
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 running() { curl -s -o /dev/null --max-time 1 "$URL/api/state"; }
+setup_py() { python3 "$ROOT/plugin/skills/setup/scripts/setup.py" "$@"; }
+# the Claude Code the studio runs: the Agent SDK's own binary, which npm install brings
+claude_bin() {
+  local b="$ROOT/node_modules/@anthropic-ai/claude-agent-sdk-darwin-$(uname -m | sed 's/x86_64/x64/')/claude"
+  if [ -x "$b" ]; then echo "$b"; else command -v claude || true; fi
+}
 
 start() {
   if running; then return 0; fi
@@ -42,6 +52,21 @@ case "${1:-open}" in
     start
     open "$URL"
     ;;
+  start)
+    start
+    echo "running at $URL"
+    ;;
+  login)
+    B="$(claude_bin)"
+    if [ -z "$B" ]; then echo "Claude Code is not here yet: run npm install in $ROOT first." >&2; exit 1; fi
+    "$B" auth login --claudeai
+    ;;
+  doctor)
+    setup_py doctor
+    ;;
+  setup)
+    setup_py install-all
+    ;;
   stop)
     if [ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null; then rm -f "$PIDF"; echo "stopped"; else pkill -f "src/server/main.ts" && echo "stopped" || echo "not running"; fi
     ;;
@@ -55,7 +80,7 @@ case "${1:-open}" in
     bash "$ROOT/scripts/make-app.sh"
     ;;
   *)
-    sed -n 2,9p "$0" | sed 's/^# \{0,1\}//'
+    sed -n 2,12p "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac

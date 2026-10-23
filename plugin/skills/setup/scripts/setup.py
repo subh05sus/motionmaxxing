@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Check and install everything motionmaxxing needs on this Mac. Stdlib only.
 
-  python3 setup.py doctor [--quiet] [--json]   one row per tool: ok, or FIX with the exact command. --quiet: silent
+  python3 setup.py doctor [--quiet] [--json]   one row per tool (and the Claude sign-in the studio runs on): ok, or
+                                               FIX with the exact command. --quiet: silent
                                                when ready, else one line; --json: the rows for the studio's setup page
   python3 setup.py install-all                 every missing step in order, never asking (Homebrew installs run
                                                themselves; anything needing a password is printed as a FIX). Each
@@ -25,6 +26,7 @@ Exit codes: 0 ready or done, 1 something to fix, 2 usage.
 """
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -85,6 +87,29 @@ def brew_fix(tool):
         'install Homebrew first: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
 
 
+def claude_bin():
+    """Claude Code as the studio runs it: the Agent SDK's own binary (npm install brings it), else one on PATH."""
+    arch = "arm64" if platform.machine() in ("arm64", "aarch64") else "x64"
+    b = PLUGIN.parent / "node_modules" / "@anthropic-ai" / f"claude-agent-sdk-{sys.platform}-{arch}" / "claude"
+    return str(b) if b.exists() else shutil.which("claude")
+
+
+def claude_row():
+    """(name, ok, detail, fix): signed in to Claude, which the studio's Claude runs on (the subscription, never an API
+    key). None where there is no Claude Code to ask: the plugin is then running inside Claude Code already."""
+    exe = claude_bin()
+    if not exe:
+        return None
+    try:
+        st = json.loads(run([exe, "auth", "status"], timeout=30).stdout or "{}")
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        st = {}
+    if st.get("loggedIn"):
+        plan = st.get("subscriptionType")
+        return ("Claude", True, "signed in" + (f" ({plan})" if plan else ""), None)
+    return ("Claude", False, "not signed in", "bin/mm login")
+
+
 def venv_ok():
     if not VPY.exists():
         return False, "not made yet"
@@ -93,8 +118,8 @@ def venv_ok():
 
 
 def rows():
-    """[(name, ok, detail, fix or None)] for every tool, in install order."""
-    out = []
+    """[(name, ok, detail, fix or None)] for every tool, in install order, after the Claude sign-in."""
+    out = [r for r in (claude_row(),) if r]
     ff = version_of(["ffmpeg", "-version"], r"ffmpeg version n?(\d+)\.(\d+)")
     out.append(("ffmpeg", bool(ff) and ff >= FFMPEG_MIN, ".".join(map(str, ff or ())) or "missing",
                 None if ff and ff >= FFMPEG_MIN else brew_fix("ffmpeg")))
@@ -323,8 +348,9 @@ def demo():
         VPY = VENV / "bin" / "python"
         assert venv_ok() == (False, "not made yet")
         names = [r[0] for r in rows()]
-        assert names == ["ffmpeg", "node", "whisper.cpp", "python 3.10-3.13", "engine venv", "transcription model",
-                         "face and cutout models", "renderer", "motion clip tools"], names
+        assert names[-9:] == ["ffmpeg", "node", "whisper.cpp", "python 3.10-3.13", "engine venv", "transcription model",
+                              "face and cutout models", "renderer", "motion clip tools"], names
+        assert names[:-9] in ([], ["Claude"]), names       # the sign-in first, where there is a Claude Code to ask
         HOME, VENV, VPY = old
     for p in python_candidates():
         v = version_of([p, "--version"], r"Python (\d+)\.(\d+)")
