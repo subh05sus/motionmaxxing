@@ -84,7 +84,12 @@ export function App() {
       const href = `/videos/${encodeURIComponent(data.id)}`;
       if (v.status === "ready" && !before.startsWith("ready")) { notify("The cut is ready", v.title); setMoment({ id: Date.now(), title: "The cut is ready", body: v.title, href }); }
       if (v.status === "editing" && !before.startsWith("editing")) { notify("The edit is ready", v.title); setMoment({ id: Date.now(), title: "The edit is ready", body: v.title, href }); }
-      if (v.progress?.step === "Exported" && v.progress.done && !before.endsWith("|Exported")) { notify("Exported", v.title); setMoment({ id: Date.now(), title: "Exported", body: "Final Cut, Premiere, Resolve, CapCut and the handoff folder" }); }
+      // "Exported", or "Exported to ~/…/Exports/<title>" when an approved edit went into the profile's export folder
+      const step = v.progress?.step ?? "";
+      if (step.startsWith("Exported") && v.progress?.done && !before.includes("|Exported")) {
+        const where = step.startsWith("Exported to ") ? `In ${step.slice("Exported to ".length)}` : "Final Cut, Premiere, Resolve, CapCut and the handoff folder";
+        notify("Exported", `${v.title}: ${where}`); setMoment({ id: Date.now(), title: "Exported", body: where });
+      }
     }).catch(() => undefined);
   });
 
