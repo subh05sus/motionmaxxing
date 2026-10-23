@@ -138,6 +138,8 @@ QUIET_HOLD_S = 5.0
 
 # word characters in every script captions are written in (lib/mm/lang.WCH: Python's \\w drops Devanagari's vowel signs)
 WCH = r"\w\u0300-\u036f\u0900-\u0963\u0966-\u097f\ua8e0-\ua8ff\u1cd0-\u1cff"
+SENT_END = (".", "?", "!", "\u0964", "\u0965")   # lib/mm/lang.SENT_END: Hindi's danda ends a sentence too
+CLAUSE_END = SENT_END + (",", ";", ":")
 
 
 def clean(text):
@@ -150,11 +152,11 @@ def cased(text, mode):
 
 
 def ends_sentence(text):
-    return text.rstrip().endswith((".", "?", "!"))
+    return text.rstrip().endswith(SENT_END)
 
 
 def ends_clause(text):
-    return text.rstrip().endswith((".", "?", "!", ",", ";", ":"))
+    return text.rstrip().endswith(CLAUSE_END)
 
 
 def join_hyphens(words):
@@ -2008,7 +2010,7 @@ def letterbox_title(words):
     out = []
     for w in words:
         out.append(w["text"].strip())
-        if w["text"].rstrip().endswith((".", "?", "!", ",")) or len(out) >= LB_TITLE_WORDS:
+        if w["text"].rstrip().endswith(SENT_END + (",",)) or len(out) >= LB_TITLE_WORDS:
             break
     while len(out) > 1 and clean(out[-1]).lower() in DANGLING:
         out.pop()
@@ -2048,7 +2050,7 @@ def letterbox_plan(head, style, words, meta, images, face, lay):
         print("note: letterbox has no opening photo: add one of your own photos or a capture to images.json "
               "(never a generated image), or leave it out", file=sys.stderr)
         return out
-    end = next((w["end"] for w in words if w["text"].rstrip().endswith((".", "?", "!"))), words[-1]["end"] if words else 3)
+    end = next((w["end"] for w in words if w["text"].rstrip().endswith(SENT_END)), words[-1]["end"] if words else 3)
     side, top = LB_CARD[0] * bh, by + LB_CARD[1] * bh
     heads = [h["box"] for h in (face or {}).get("heads", []) if h.get("box")]
     cx = sorted(b[0] + b[2] / 2 for b in heads)[len(heads) // 2] if heads else 40

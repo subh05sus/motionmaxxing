@@ -20,6 +20,15 @@ In German the fillers are "äh", "ähm" (always cut) and "also", "halt", "quasi"
 they are hesitation, flagged in candidates.md); a restart is often "warte", "sorry", "nochmal", "von vorne", "ich fang
 nochmal an". A number may be written as digits in one take and words in the next ("fünf" / "5"): the same words.
 
+In English the fillers are "um", "uh", "erm" (always cut) and "like", "you know", "I mean" (cut only where they are
+hesitation); a restart is often "wait", "sorry", "let me start again", "one more time", "scratch that".
+
+In Hindi and Hinglish the fillers are "अम्म", "उम्म", "हम्म", "umm" (always cut) and "मतलब"/"matlab", "basically",
+"actually", "यानी" (cut only where they are hesitation); a restart is often "रुको", "एक second", "sorry", "फिर से",
+"दोबारा", "नहीं नहीं", "galat", "ek baar aur". Numbers come as Hindi words, digits or English ("पंद्रह" / "15" /
+"fifteen"): the same words. A retake can come back in the other script ("karna" for "करना"); the finder compares Hindi
+by sound, and a sentence ends at the danda (।) as well as a full stop.
+
 `[N.Ns of speech not transcribed]` after a word: Whisper folded more speech into that one label than
 the word holds, usually a repeat, and transcribing the stretch again did not recover it. No span can
 quote those words. If the label sits inside a retake, cut from the word before it to the keeper's

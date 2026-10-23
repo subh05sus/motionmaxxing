@@ -31,10 +31,11 @@ sys.path.insert(0, str(HERE))
 from build_timeline import resolve_spans  # noqa: E402
 from judge_cut import cuts_of, extract_json, inside, spans_of, text_of, toks_of  # noqa: E402
 
-END = re.compile(r'[.?!]["”]?$')
+from mm.lang import WCH  # noqa: E402
+END = re.compile(r'[.?!\u0964\u0965]["”]?$')   # । ends a Hindi sentence
 DROP, REPORT = {"repeat", "false_start"}, {"stitch", "lost_word"}
 STOP_S = 5.0
-nt = lambda s: re.sub(r"[\W_]", "", str(s).lower())
+nt = lambda s: re.sub(rf"[^{WCH}]|_", "", str(s).lower())   # WCH: \\W drops Devanagari's vowel signs
 
 HOW_TO_READ = """HOW TO READ THE PAPER EDIT
 Each line is one kept sentence: [raw time in the take] then the words the viewer hears. Text

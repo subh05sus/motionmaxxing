@@ -115,7 +115,7 @@ def sentences(toks):
         x = t["text"].strip().rstrip("\"')]")
         if re.search(r"(\.\.|…)$", x):   # an unfinished line: never the hook, and not part of the next
             cur = []
-        elif re.search(r"[.?!]$", x):
+        elif re.search(r"[.?!\u0964\u0965]$", x):
             out.append(cur)
             cur = []
     return out, cur

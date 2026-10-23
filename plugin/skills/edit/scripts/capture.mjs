@@ -254,8 +254,8 @@ const STICKER = (target, finds, fit, keepGround) => `(() => {
   const blk = map[at][2];
   // the sentence: out to . ! ? followed by a space, never past the block
   let a = at, b = at + want.length - 1;
-  while (a > 0 && map[a - 1][2] === blk && !(text[a - 1] === ' ' && /[.!?]/.test(text[a - 2] || ''))) a--;
-  while (b < text.length - 1 && map[b + 1][2] === blk && !(/[.!?]/.test(text[b]) && text[b + 1] === ' ')) b++;
+  while (a > 0 && map[a - 1][2] === blk && !(text[a - 1] === ' ' && /[.!?।॥]/.test(text[a - 2] || ''))) a--;
+  while (b < text.length - 1 && map[b + 1][2] === blk && !(/[.!?।॥]/.test(text[b]) && text[b + 1] === ' ')) b++;
   while (text[a] === ' ') a++;
   while (text[b] === ' ') b--;
   const r = document.createRange();

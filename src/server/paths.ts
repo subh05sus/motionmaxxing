@@ -36,33 +36,39 @@ export function inside(p: string, roots = ALLOWED_ROOTS()): boolean {
 
 const GERMAN: Record<string, string> = { ä: "ae", ö: "oe", ü: "ue", Ä: "Ae", Ö: "Oe", Ü: "Ue", ß: "ss" };
 
-// Devanagari in Latin letters, for a Hindi file name: consonants carry an "a" unless a vowel sign or a virama follows,
-// and a word's last one drops it (मेरा वीडियो -> mera-vidiyo). Dropping the vowel signs as marks left "मर-वडय".
+// Devanagari in Latin letters, for a Hindi file name (मेरा वीडियो -> mera-vidiyo, अपना -> apna): a consonant carries an
+// "a" unless a vowel sign or a virama follows, and Hindi drops that "a" at a word's end and between a vowel and a
+// consonant that has one (कमरा kamra, समझना samajhna, कमल kamal). Dropping the vowel signs as marks left "मर-वडय".
 const DEVA_C: Record<string, string> = Object.fromEntries(
   "क k ख kh ग g घ gh ङ n च ch छ chh ज j झ jh ञ n ट t ठ th ड d ढ dh ण n त t थ th द d ध dh न n प p फ ph ब b भ bh म m य y र r ल l ळ l व v श sh ष sh स s ह h"
     .split(" ").reduce<string[][]>((a, x, i) => (i % 2 ? (a[a.length - 1]!.push(x), a) : [...a, [x]]), []));
 const DEVA_NUKTA: Record<string, string> = { क: "q", ख: "kh", ग: "g", ज: "z", ड: "r", ढ: "rh", फ: "f", य: "y" };
-const DEVA_V: Record<string, string> = { अ: "a", आ: "aa", इ: "i", ई: "ee", उ: "u", ऊ: "oo", ऋ: "ri", ए: "e", ऐ: "ai", ओ: "o", औ: "au", ऑ: "o", ऍ: "e",
-  "ा": "a", "ि": "i", "ी": "i", "ु": "u", "ू": "u", "ृ": "ri", "े": "e", "ै": "ai", "ो": "o", "ौ": "au", "ॉ": "o", "ॅ": "e",
-  "ं": "n", "ँ": "n", "ः": "h", "०": "0", "१": "1", "२": "2", "३": "3", "४": "4", "५": "5", "६": "6", "७": "7", "८": "8", "९": "9" };
-function devanagari(s: string): string {
-  const cs = [...s.normalize("NFD")];
-  let out = "";
+const DEVA_VOWEL: Record<string, string> = { अ: "a", आ: "aa", इ: "i", ई: "ee", उ: "u", ऊ: "oo", ऋ: "ri", ए: "e", ऐ: "ai", ओ: "o", औ: "au", ऑ: "o", ऍ: "e" };
+const DEVA_SIGN: Record<string, string> = { "ा": "a", "ि": "i", "ी": "i", "ु": "u", "ू": "u", "ृ": "ri", "े": "e", "ै": "ai", "ो": "o", "ौ": "au", "ॉ": "o", "ॅ": "e" };
+const DEVA_OTHER: Record<string, string> = { "ं": "n", "ँ": "n", "ः": "h", "०": "0", "१": "1", "२": "2", "३": "3", "४": "4", "५": "5", "६": "6", "७": "7", "८": "8", "९": "9" };
+function devanagari(word: string): string {
+  const cs = [...word.normalize("NFD")];
+  const u: { c: string; v: string; schwa?: boolean }[] = [];   // a consonant (or none) and the vowel it carries
   for (let i = 0; i < cs.length; i++) {
-    const c = cs[i]!;
-    if (DEVA_C[c]) {
-      const nukta = cs[i + 1] === "\u093c";
-      out += nukta ? DEVA_NUKTA[c] ?? DEVA_C[c] : DEVA_C[c];
-      const next = cs[i + (nukta ? 2 : 1)];
-      if (nukta) i++;
-      if (next === "\u094d") { i++; continue; }                     // virama: no vowel
-      if (next && "\u093e\u093f\u0940\u0941\u0942\u0943\u0947\u0948\u094b\u094c\u0949\u0945".includes(next)) continue;   // its vowel sign follows
-      if (next && /[\u0900-\u0903\u0915-\u0939\u0958-\u095f]/.test(next)) out += "a";   // the "a" inside a word, not at its end
-      continue;
-    }
-    out += DEVA_V[c] ?? (c === "\u093c" || c === "\u094d" ? "" : c);
+    const ch = cs[i]!;
+    if (DEVA_C[ch]) {
+      let c = DEVA_C[ch]!;
+      if (cs[i + 1] === "\u093c") { c = DEVA_NUKTA[ch] ?? c; i++; }
+      const nx = cs[i + 1] ?? "";
+      if (nx === "\u094d") { u.push({ c, v: "" }); i++; }
+      else if (DEVA_SIGN[nx]) { u.push({ c, v: DEVA_SIGN[nx]! }); i++; }
+      else u.push({ c, v: "a", schwa: true });
+    } else if (DEVA_VOWEL[ch]) u.push({ c: "", v: DEVA_VOWEL[ch]! });
+    else if (DEVA_OTHER[ch]) u.push({ c: DEVA_OTHER[ch]!, v: "" });
+    else if (ch !== "\u093c" && ch !== "\u094d") u.push({ c: ch, v: "" });
   }
-  return out;
+  const last = u[u.length - 1];
+  if (u.length > 1 && last?.schwa) last.v = "";
+  for (let i = u.length - 2; i >= 1; i--) {
+    const [prev, cur, next] = [u[i - 1]!, u[i]!, u[i + 1]!];
+    if (cur.schwa && prev.v && next.c && next.v) cur.v = "";
+  }
+  return u.map((x) => x.c + x.v).join("");
 }
 
 /** A folder- and URL-safe slug: "IMG 1234.MOV" -> "img-1234", "Über Jarvis" -> "ueber-jarvis", "मेरा वीडियो" -> "mera-vidiyo". */

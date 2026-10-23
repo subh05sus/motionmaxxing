@@ -90,7 +90,7 @@ def phrases(toks):
     out, a = [], 0
     for i in range(1, len(toks) + 1):
         if i == len(toks) or toks[i]["start"] - toks[i - 1]["end"] >= PHRASE_GAP_S \
-                or toks[i - 1]["text"].strip().endswith((".", "?", "!")):
+                or toks[i - 1]["text"].strip().endswith(lang.SENT_END):
             out.append((a, i - 1))
             a = i
     return out
@@ -234,7 +234,7 @@ def alt_hooks(toks):
             hits.append(a)
         # matched on the word sequence, not the phrase edge: Whisper can hang the take's first word on
         # the phrase before it ("more tips I | built a model router"), the "I" stretched over the pause
-        elif not toks[a - 1]["text"].strip().endswith((".", "?", "!", ",", ";", ":")) \
+        elif not toks[a - 1]["text"].strip().endswith(lang.CLAUSE_END) \
                 and similar_openings(first, opening(toks, a - 1, b)):
             hits.append(a - 1)
     takes, e = [], len(toks)
@@ -276,7 +276,7 @@ def loose_like(toks, i):
     comparison and "das ist halt so" a particle: never a filler."""
     prev = toks[i - 1] if i else None
     nxt = toks[i + 1] if i + 1 < len(toks) else None
-    if prev is None or prev["text"].strip().endswith((".", "?", "!", ",")) or toks[i]["text"].strip().endswith(","):
+    if prev is None or prev["text"].strip().endswith(lang.SENT_END + (",",)) or toks[i]["text"].strip().endswith(","):
         return True
     if toks[i]["start"] - prev["end"] >= 0.3 or (nxt and nxt["start"] - toks[i]["end"] >= 0.3):
         return True
@@ -319,7 +319,7 @@ def find(toks, keep_fillers=False):
         words = sum(len(nwords(t["text"])) for t in toks[a:b + 1])
         if a in restarted or pi + 1 >= len(phr) or words > 8 or a >= tail:
             continue
-        if toks[b]["text"].strip().endswith((".", "?", "!")):
+        if toks[b]["text"].strip().endswith(lang.SENT_END):
             continue
         add("false_start", a, b, True)
 
@@ -433,8 +433,9 @@ def hook_variant(d, n):
 # --- fix -------------------------------------------------------------------------
 
 def swap(text, old, new):
-    """`old` -> `new` as a whole word (case-insensitive), the token's punctuation kept."""
-    return re.sub(rf"(?i)(?<![\w']){re.escape(old)}(?![\w'])", lambda _: new, text)
+    """`old` -> `new` as a whole word (case-insensitive), the token's punctuation kept. A word's edge is lang.WCH's:
+    with \\w a vowel sign ended a Devanagari word, so a fix of क landed inside का."""
+    return re.sub(rf"(?i)(?<![{lang.WCH}']){re.escape(old)}(?![{lang.WCH}'])", lambda _: new, text)
 
 
 def fix(d, pairs):
@@ -490,7 +491,7 @@ def romanize_words(ws):
             if start:
                 r = re.sub(r"[a-z]", lambda m: m.group(0).upper(), r, count=1)
             w["text"] = r
-        start = w["text"].rstrip().endswith((".", "?", "!", "\u0964"))
+        start = w["text"].rstrip().endswith(lang.SENT_END)
     return ws
 
 
@@ -553,10 +554,10 @@ def remap_beats(raw, old_spans, new_spans, beats):
     key = lambda t: re.sub(rf"[^{lang.WCH}'’-]+", "", t).lower()      # plan.py clean().lower()
     old = [i for i, w in enumerate(raw) if is_kept(w, old_spans)]
     new = {i for i, w in enumerate(raw) if is_kept(w, new_spans)}
-    sentence, n = [], 0      # a sentence ends at . ? ! (a false start before a retake has none, so it joins it)
+    sentence, n = [], 0      # a sentence ends at . ? ! । (a false start before a retake has none, so it joins it)
     for w in raw:
         sentence.append(n)
-        n += w["text"].rstrip().endswith((".", "?", "!"))
+        n += w["text"].rstrip().endswith(lang.SENT_END)
     kept, dropped = [], []
     for b in beats:
         if not b.get("word") or not b.get("nth"):

@@ -80,6 +80,18 @@ captions.json in place, timings untouched, and is kept in `fixes.json` for every
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/cut/scripts/retakes.py" fix edits/<name> cloud=Claude jiv=Jev
 ```
 
+The edit's language (`meta.json` "lang") sets the script captions are written in:
+
+- **German, English:** as said.
+- **Hindi:** Devanagari, with English words in Latin letters as Whisper wrote them ("calendar से जोड़ो").
+- **Hinglish:** `captions` writes each Hindi word in Roman letters the way Hinglish is written (आज aaj, करना karna,
+  नहीं nahi, ज़रूरत zaroorat), so captions.txt reads "Laatap ki zaroorat nahi hai." Proofread it for spellings a
+  Hinglish viewer would stumble on and fix them in Roman letters, a word at a time (`fix edits/<name> Laatap=Laptop
+  usi=use`): the common spelling ("hai", "nahi", "kaise", "bhai"), never another word.
+
+The captions' fonts draw Devanagari (the caption font's own, else Noto Sans Devanagari behind it), and so do the
+motion clips: text on screen in Hindi is set as it is, never in Latin letters to dodge the font.
+
 Use captions.json from here on.
 
 ## 3. Visuals

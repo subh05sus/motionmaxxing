@@ -72,7 +72,7 @@ def motion_findings(plan, style):
     if m.get("engine", "clips") != "clips" or not (m.get("amount") or 0) > 0:
         return []
     clips = [c for c in plan["cards"] if ((c.get("anim") or {}).get("props") or {}).get("motion")]
-    lines = sum(1 for c in plan["captions"]["chunks"] if re.search(r"[.!?]$", c["text"].strip())) or 1
+    lines = sum(1 for c in plan["captions"]["chunks"] if re.search(r"[.!?\u0964\u0965]$", c["text"].strip())) or 1
     fix = ("run the motion skill: a kit clip per beat (motion.py scaffold, check, place-kit; plan.py, motion.py align, "
            "plan.py), then render")
     if not clips:

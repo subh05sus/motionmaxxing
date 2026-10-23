@@ -33,6 +33,8 @@ HERE = Path(__file__).resolve().parent
 SKILL = HERE.parent
 PLUGIN = SKILL.parents[1]
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(PLUGIN / "lib"))
+from mm import lang as L  # noqa: E402
 
 HF_VERSION = "0.8.155"     # setup.py installs exactly this (MOTION_PKGS); 0.7.x had other flags
 GSAP_VERSION = "3.14.2"
@@ -94,7 +96,7 @@ def ensure_tools(install=None):
 
 
 def clean(t):
-    return re.sub(r"[^\w'’-]+", "", t).lower()
+    return re.sub(rf"[^{L.WCH}'’-]+", "", t).lower()   # WCH: with \\w, का and की were one word
 
 
 def slug(t):
@@ -113,7 +115,7 @@ def sentences(words):
     for i, w in enumerate(words):
         cur.append(w)
         nxt = words[i + 1] if i + 1 < len(words) else None
-        if nxt is None or w["text"].rstrip().endswith((".", "?", "!")) or nxt["start"] - w["end"] > 0.8:
+        if nxt is None or w["text"].rstrip().endswith(L.SENT_END) or nxt["start"] - w["end"] > 0.8:
             out.append({"text": " ".join(x["text"] for x in cur).strip(), "start": cur[0]["start"], "end": cur[-1]["end"]})
             cur = []
     return out
@@ -153,23 +155,25 @@ def allowed_types(cfg):
     return tuple(t for k, ts in KINDS.items() if cfg["kinds"][k] for t in ts) if cfg["engine"] == "clips" else ()
 
 
-def promote_type(line):
+def promote_type(line, code=None):
     """The moving template a sentence asks for, whatever visual-prep routed there: a before and after, a number,
-    steps (first... then...) or a natural list (four or more items said in a row: "a, b, c and d"). None: no motion."""
+    steps (first... then...) or a natural list (four or more items said in a row: "a, b, c and d"). None: no motion.
+    code: the edit's language (route.cues)."""
     sys.path.insert(0, str(SKILL.parent / "edit" / "scripts"))
     import route
-    if route.VERSUS.search(line):
+    c, t = route.cues(code), route.flat(line)
+    if c["versus"].search(t):
         return "side_by_side"
-    if route.NUM.search(line):
+    if re.search(r"\d", line) or c["number"].search(t):
         return "likes"
-    if len(route.STEPS.findall(line)) >= 2:
+    if len(c["steps"].findall(t)) >= 2:
         return "flow"
-    if line.count(",") >= 3 or (line.count(",") >= 2 and re.search(r",? (?:and|or) ", line)):
+    if line.count(",") >= 3 or (line.count(",") >= 2 and c["and_or"].search(t)):
         return "notes"
     return None
 
 
-def beats_for(visuals, words, aspect="9:16", max_n=8, images=(), types=MOTION_TYPES, amount=1.0, face=None):
+def beats_for(visuals, words, aspect="9:16", max_n=8, images=(), types=MOTION_TYPES, amount=1.0, face=None, code=None):
     """The visuals.json beats that become clips: [{id, i, word, nth, start, dur, words, line, ...}].
     types: the template formats clips may replace (style.json motion kinds); amount: the share of them built.
     A beat routed to anything else (a card, a capture, a sticker) whose sentence is a list, a number, steps or a
@@ -193,7 +197,7 @@ def beats_for(visuals, words, aspect="9:16", max_n=8, images=(), types=MOTION_TY
             continue
         if v.get("kind") != "anim":   # routed elsewhere: a clip only when the sentence itself moves
             si = sent_of(t)
-            pt = promote_type(sents[si]["text"]) if si is not None and si not in animated else None
+            pt = promote_type(sents[si]["text"], code) if si is not None and si not in animated else None
             if pt not in types:
                 continue
             animated.add(si)
@@ -317,7 +321,8 @@ def pick(edit, max_n=8):
     types = allowed_types(cfg)
     if board_size(style):   # Motion design: logos and flows land as tiles on the canvas, never as clips
         types = tuple(t for t in types if t not in ("logo_cluster", "flow"))
-    beats = beats_for([v.get("fallback") or v for v in visuals], words, aspect, max_n, images, types, cfg["amount"], face)
+    beats = beats_for([v.get("fallback") or v for v in visuals], words, aspect, max_n, images, types, cfg["amount"], face,
+                      L.of(edit))
     pj = edit / "plan.json"
     if pj.exists() and pj.stat().st_mtime >= (edit / "visuals.json").stat().st_mtime:   # the plan dropped some beats
         kept = {(c.get("trigger_word") or "").lower() for c in json.loads(pj.read_text(encoding="utf-8")).get("cards", [])}
@@ -1002,7 +1007,7 @@ def retime(edit, total=None):
     import difflib
     edit = Path(edit)
     words = cut_words(edit)
-    norm = lambda s: re.sub(r"[^\w]+", "", s.lower())
+    norm = lambda s: re.sub(rf"[^{L.WCH}]+", "", s.lower())
     caps = [norm(w["text"]) for w in words]
     root = edit / "motion"
     clips = sorted((json.loads(f.read_text(encoding="utf-8")) for f in root.glob("*/beat.json")), key=lambda b: b["start"])
@@ -1044,7 +1049,7 @@ def retime(edit, total=None):
 def first_word(words, t0):
     """(word, nth, time): the first word said once a clip has begun. Its card starts on it (0.1 s early), so the clip
     plays from its own start and half-screen clips sit back to back (a later word left the panel empty between)."""
-    norm = lambda s: re.sub(r"[^\w]+", "", s.lower())
+    norm = lambda s: re.sub(rf"[^{L.WCH}]+", "", s.lower())
     for i, w in enumerate(words):
         if w["start"] >= t0 + 0.02:
             return w["text"], sum(1 for x in words[:i + 1] if norm(x["text"]) == norm(w["text"])), w["start"]

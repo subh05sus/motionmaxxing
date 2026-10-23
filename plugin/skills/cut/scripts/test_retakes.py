@@ -192,6 +192,8 @@ def test_hinglish_captions_are_in_roman_letters():
         assert " ".join(x["text"] for x in words) == "Doston, aaj AI assistant banayein. Laatap ki nahi", words
         words, _ = R.caption_words(heard, cut, fixes={"Laatap": "Laptop"}, roman=True)
         assert "Laptop ki" in " ".join(x["text"] for x in words), words
+        assert R.swap("का काम क।", "क", "ख") == "का काम ख।"     # a vowel sign is inside the word: only the lone क
+        assert R.swap("लाटाप,", "लाटाप", "लैपटॉप") == "लैपटॉप,"
     finally:
         R.use_lang("en")
 

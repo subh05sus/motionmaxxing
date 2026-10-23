@@ -1039,7 +1039,7 @@ def cmd_share(d):
     d = Path(d)
     site, story = load(d, "site.json"), load(d, "story.json")
     cap = (story.get("share") or {}).get("caption", "")
-    bad = [p for p in re.split(r"(?<=[.!?])\s+|\n+", cap) if p.strip() and site["domain"] not in p and not is_site_phrase(p, site)]
+    bad = [p for p in re.split(r"(?<=[.!?\u0964\u0965])\s+|\n+", cap) if p.strip() and site["domain"] not in p and not is_site_phrase(p, site)]
     if not cap:
         sys.exit('ERROR: story.json has no "share": {"caption": ...}; write it from the site\'s own phrases')
     if bad:

@@ -2,16 +2,22 @@
 name: cut
 description: Cuts raw talking-head footage into a clean jump cut. Takes one take or several joined (mp4 or mov, any aspect, 4K phone footage is fine), transcribes it word by word, removes retakes, false starts, fillers and dead pauses, and renders cut.mp4 at the source resolution plus words.json timed to the cut. The user approves the cut on a page with the whole transcript and every removed word struck through. Use when the user says "cut my video", "just cut it", "remove my mistakes", "cut out the retakes", "remove the pauses", "clean up this take", "jump cut this", "tighten this clip", or asks only for the cut of a raw take; start calls it for a full edit. Runs before edit. Not for a general request to edit a video or to make it look like a creator (that is start), not for adding captions, zooms or cards (edit), and not for analysing someone else's videos (teardown).
 license: MIT
-compatibility: macOS, ffmpeg, whisper.cpp with Whisper large-v3-turbo and the engine venv (the setup skill installs them). Runs from the full motionmaxxing plugin folder (uses its lib/). German and English takes.
+compatibility: macOS, ffmpeg, whisper.cpp with Whisper large-v3-turbo and the engine venv (the setup skill installs them). Runs from the full motionmaxxing plugin folder (uses its lib/). German, English, Hindi and Hinglish takes.
 ---
 
 # Cut
 
 Paths: `${CLAUDE_SKILL_DIR}` means the folder containing this SKILL.md, and `${CLAUDE_PLUGIN_ROOT}` the plugin folder two levels above it.
 
-German first: the take's language is detected when it is transcribed and saved in `edits/<name>/meta.json`; every
-script reads the take in it (German fillers "äh"/"ähm", restarts "warte", "nochmal von vorne", number words). The
-user's spoken German is never rewritten: a cut only removes.
+The take's language (German, English, Hindi or Hinglish) is the one the user picked in the studio, else the one heard
+when it is transcribed, saved in `edits/<name>/meta.json`; every script reads the take in it (fillers "äh", "umm",
+"अम्म"; restarts "warte", "wait", "रुको", "phir se"; number words). The user's spoken words are never rewritten: a cut
+only removes.
+
+Hindi and Hinglish: Whisper writes Hindi in Devanagari and English words in Latin letters, and the same word can come
+back in the other script in another take ("करना" / "karna"). The scripts compare Hindi words by sound, so read a mixed
+transcript as one language and quote spans as Whisper wrote them. Hindi is Hinglish when English words make about an
+eighth of it: its captions come out in Roman letters in the edit, while words.json stays as Whisper wrote it.
 
 Read `${CLAUDE_PLUGIN_ROOT}/PRINCIPLES.md` first: the rules every video in this plugin follows.
 
@@ -74,9 +80,11 @@ python3 "$PY" "$S/transcribe.py" <source> edits/<name>/words.raw.json [--script 
 
 A script (or `--keyterm Name`, repeatable) gets names and jargon right. For a German take, pass every product, tool
 and person the script names as a `--keyterm` (German capitalises every noun, so names are not picked out by case).
+In a Hindi or Hinglish script, names and English terms are the words in Latin letters: they are picked out by themselves.
 
 Say the time first: about a third of the take's length (whisper.cpp, large-v3-turbo, on the Mac's GPU; a 5-minute take
-took 1:25). The language is detected first (`--lang de` to set it). Never download a model mid-edit: a model that is not
+took 1:25). The language is detected first (`--lang de|en|hi|hinglish` to set it; the studio's pick is read from meta.json).
+Hindi and Hinglish word times come from Whisper's alignment (DTW): its plain times ran up to a second early. Never download a model mid-edit: a model that is not
 installed exits 4; run the setup skill.
 
 Then, always, heal the transcript before deciding anything (about a minute):

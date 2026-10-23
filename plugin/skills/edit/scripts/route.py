@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+from mm import lang as L  # noqa: E402
 
 # graphics.kinds (creator-teardown style.json) -> the routes that show that kind of thing from a real source.
 # A text card is never built (type cards were removed): it routes to a sticker of the real sentence, or, in a
@@ -39,12 +40,12 @@ MAX_LINES = 30   # sentences printed for a highlight, nearest the spoken words f
 
 
 def sentences(words):
-    """[{i, text, start, end, words}] split at . ? ! and at pauses over 0.8 s."""
+    """[{i, text, start, end, words}] split at . ? ! । and at pauses over 0.8 s."""
     out, cur = [], []
     for i, w in enumerate(words):
         cur.append(w)
         nxt = words[i + 1] if i + 1 < len(words) else None
-        if nxt is None or w["text"].rstrip().endswith((".", "?", "!")) or nxt["start"] - w["end"] > 0.8:
+        if nxt is None or w["text"].rstrip().endswith(L.SENT_END) or nxt["start"] - w["end"] > 0.8:
             out.append({"i": len(out), "text": " ".join(x["text"] for x in cur).strip(),
                         "start": cur[0]["start"], "end": cur[-1]["end"]})
             cur = []
@@ -142,30 +143,42 @@ def where(style):
 def rank_highlight(blocks, said):
     """A captured page's sentences, the ones sharing the most words with `said` first."""
     # one sentence per option: the highlight sweeps a sentence, not a paragraph
-    blocks = [x for b in blocks for x in re.split(r"(?<=[.!?])\s+", b) if len(x) > 15]
+    blocks = [x for b in blocks for x in re.split(r"(?<=[.!?\u0964])\s+", b) if len(x) > 15]
     toks = set(re.findall(r"[a-z0-9]+", said.lower()))
     return sorted(blocks, key=lambda b: -len(toks & set(re.findall(r"[a-z0-9]+", b.lower()))))[:MAX_LINES]
 
 
-NUM = re.compile(r"\b\d[\d,.]*\b|\b(?:hundred|thousand|million|billion|percent|half|double|twice|times)\b", re.I)
-STEPS = re.compile(r"\b(?:first|second|third|then|next|finally|step)\b", re.I)
-VERSUS = re.compile(r"\b(?:before|after|instead|versus|vs|used to|compared|better than|worse than|faster than)\b", re.I)
-FLOWS = re.compile(r"\b(?:sends?|goes to|passes|hands?|from \w+ to|into|pipeline|workflow|connects?)\b", re.I)
-UI = re.compile(r"\b(?:drag|click|type|upload|render(?:s|ing)?|cut(?:s|ting)?|open|install|run(?:s|ning)?|press)\b", re.I)
+CUES = {}
 
 
-def motion_kind(text):
+def cues(code=None):
+    """The edit language's cue phrases (lang.py Pack.motion) as regexes over flat() text."""
+    P = L.pack(code)
+    if P.code not in CUES:
+        CUES[P.code] = {k: re.compile(r"(?<!\S)(?:" + "|".join(v) + r")(?!\S)", re.I) for k, v in P.motion.items()}
+    return CUES[P.code]
+
+
+def flat(text):
+    """Lower case with the punctuation out, padded: words between spaces in every script (\\b cannot bound Devanagari:
+    a word ending in a vowel sign never ends for it)."""
+    return " " + re.sub(rf"[^{L.WCH}'\s]+", " ", text.lower()) + " "
+
+
+def motion_kind(text, code=None):
     """What a sentence is doing, for the motion skill (style.json "motion" kinds): a number said, steps or a list of
-    three or more, a comparison, things handing work along, an app being used. None: nothing to animate."""
-    if VERSUS.search(text):
+    three or more, a comparison, things handing work along, an app being used. None: nothing to animate. code: the
+    edit's language (its cue words)."""
+    c, t = cues(code), flat(text)
+    if c["versus"].search(t):
         return "before_after"
-    if NUM.search(text):
+    if re.search(r"\d", text) or c["number"].search(t):
         return "counter"
-    if len(STEPS.findall(text)) >= 2 or text.count(",") >= 2:
+    if len(c["steps"].findall(t)) >= 2 or text.count(",") >= 2:
         return "list"
-    if FLOWS.search(text):
+    if c["flow"].search(t):
         return "flow"
-    if UI.search(text):
+    if c["ui"].search(t):
         return "ui_demo"
     return None
 
@@ -178,6 +191,16 @@ def demo():
     assert [motion_kind(b["text"]) for b in bs] == [None, "before_after", None]
     assert motion_kind("over 10,000 people asked for it") == "counter" and motion_kind("first cut it, then render it") == "list"
     assert motion_kind("you can drag in a video") == "ui_demo" and motion_kind("it sends the take to the judge") == "flow"
+    # German and Hindi say it in their own words; Hindi's words have no \\b edges (a vowel sign ends them)
+    assert motion_kind("Vorher hat das zwei Stunden gedauert", "de") == "before_after"
+    assert motion_kind("Zuerst schneidest du, dann renderst du", "de") == "list"
+    assert motion_kind("Du klickst einfach auf Teilen", "de") == "ui_demo" and motion_kind("Das ist gut", "de") is None
+    assert motion_kind("पहले इसे खोलो फिर upload करो", "hi") == "list"
+    assert motion_kind("ये Claude से बेहतर है", "hi") == "before_after" and motion_kind("ye Claude se better hai", "hinglish") == "before_after"
+    assert motion_kind("दो लाख लोग", "hi") == "counter" and motion_kind("bas yahan click karo", "hinglish") == "ui_demo"
+    assert motion_kind("आज मौसम अच्छा है", "hi") is None and motion_kind("फिरोज़", "hi") is None   # फिर inside a word is not फिर
+    assert [b["text"] for b in sentences([{"text": t, "start": i * 0.4, "end": i * 0.4 + 0.3} for i, t in
+                                          enumerate("पहला कदम। दूसरा कदम।".split())])] == ["पहला कदम।", "दूसरा कदम।"]
     names = [{"name": "Jev"}, {"name": "Claude"}, {"name": "Claude Code"}]
     for b in bs:
         b["names"] = named(b["text"], names)
@@ -287,7 +310,7 @@ def main():
             print(line)
         for b in beats:
             b["pick"] = None   # Claude routes each sentence
-            b["motion"] = motion_kind(b["text"])   # a hint: the motion skill builds a clip where the pick is a moving format
+            b["motion"] = motion_kind(b["text"], L.of(edit))   # a hint: the motion skill builds a clip where the pick is a moving format
         (edit / "beats.json").write_text(json.dumps(beats, indent=1), encoding="utf-8")
         for b in beats:
             print(f"{b['start']:6.2f} {'*' if b.get('want') else ' '} {str(b.get('motion') or ''):12}  {b['text']}"

@@ -45,6 +45,7 @@ import retakes  # noqa: E402
 import trend  # noqa: E402
 from textnorm import canon_src, nwords  # noqa: E402
 from mm import taste  # noqa: E402
+from mm.lang import SENT_END  # noqa: E402
 
 PAUSE_S = 0.3        # a raw silence this long is a pause the cut had to decide on
 MIN_SILENCE_S = 0.03  # shortest silence silencedetect reports
@@ -169,7 +170,7 @@ def measure(raw, pub, sil_raw=None, sil_pub=None):
     m["false_cuts"] = {"words": len(ours_idx & kept),
                        "where": [{"kind": c["kind"], "at": round(c["at"], 2), "text": c["text"][:80]} for c in false]}
     missed = runs(set(range(len(raw))) - kept - ours_idx)
-    ends = lambda i: i < 0 or raw[i]["text"].rstrip().endswith((".", "?", "!"))
+    ends = lambda i: i < 0 or raw[i]["text"].rstrip().endswith(SENT_END)
     whole = [(a, b) for a, b in missed if b - a + 1 >= MIN_LINE_WORDS and ends(a - 1) and ends(b)]
     m["missed"] = {"words": sum(b - a + 1 for a, b in missed), "lines": len(whole),
                    "longest": [{"at": round(raw[a]["start"], 2), "text": say(raw, a, b)[:80]}

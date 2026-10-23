@@ -11,8 +11,9 @@ export interface ScriptSummary { id: string; title: string; createdAt: string; u
 
 export function factLine(c: Record<string, number> | null): string {
   if (!c) return "";
-  const bad = (c.falsch ?? 0) + (c.veraltet ?? 0) + (c.ungenau ?? 0);
-  return `${c.total} claims · ${bad ? `${bad} to change` : "nothing to change"}${c["ungeprüft"] ? ` · ${c["ungeprüft"]} unchecked` : ""}`;
+  // verdict codes as the server gives them (facts.json, or an older German facts.md mapped onto them)
+  const bad = (c.wrong ?? 0) + (c.outdated ?? 0) + (c.imprecise ?? 0);
+  return `${c.total} claims · ${bad ? `${bad} to change` : "nothing to change"}${c.unchecked ? ` · ${c.unchecked} unchecked` : ""}`;
 }
 
 /** Scripts: paste one before recording; Claude checks every claim against sources found now. */

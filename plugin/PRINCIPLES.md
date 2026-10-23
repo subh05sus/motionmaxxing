@@ -8,8 +8,9 @@ The rules every skill follows. Each names where it is enforced.
   code folder, never anything private in it. (`library.py`)
 - Everything runs on this Mac, on the user's own Claude login. No API keys, no paid services: transcription is
   whisper.cpp on the GPU, looking at frames is Claude. Free stock libraries take a free key in Settings.
-- German first: anything that reads speech goes through `lib/mm/lang.py` (fillers, restarts, numbers, stop words,
-  Whisper's prompt). The speaker's own words are never rewritten: a cut removes, it never rephrases.
+- German, English, Hindi and Hinglish: anything that reads speech goes through `lib/mm/lang.py` (fillers, restarts,
+  numbers, stop words, sentence ends, Whisper's prompt), and Hindi words are compared by sound in either script
+  (`lib/mm/hindi.py`). The speaker's own words are never rewritten: a cut removes, it never rephrases.
 
 ## Asking
 

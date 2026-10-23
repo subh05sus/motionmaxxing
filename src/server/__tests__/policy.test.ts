@@ -46,6 +46,9 @@ describe("names and words", () => {
     expect(slug("AI टूल्स - भाग 2")).toBe("ai-tuls-bhag-2");
     expect(slug("ज़रूरी बात")).toBe("zaruri-bat");
     expect(slug("कमल")).toBe("kamal");
+    expect(slug("अपना AI असिस्टेंट")).toBe("apna-ai-asistent");
+    expect(slug("समझना")).toBe("samajhna");
+    expect(slug("कमरा हिंदी में")).toBe("kamra-hindi-men");
   });
   it("calls a word kept the way the timeline builder does", () => {
     const spans = [{ start: 1, end: 2 }];

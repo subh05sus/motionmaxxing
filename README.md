@@ -18,7 +18,10 @@ waiting gets sped up and the camera follows the action.
 
 It runs on your Mac with your own Claude login. No API keys, no paid services.
 
-German first: the cut knows German fillers ("äh", "ähm"), restarts ("warte", "nochmal") and number words.
+It cuts German, English, Hindi and Hinglish. The cut knows each language's fillers ("äh", "umm", "अम्म"), restarts
+("warte", "wait", "रुको", "phir se") and number words, and it hears Hindi by sound: a retake Whisper wrote in Latin
+letters still matches its first try in Devanagari. Hindi captions are in Devanagari, Hinglish ones in Roman letters
+("aaj hum AI tools ki baat karenge"), and Devanagari has its own font in captions and motion graphics.
 
 ## Start
 
@@ -53,7 +56,7 @@ tags a release and points the Homebrew formula at it.
 
 The studio:
 
-- **New video**: the raw take, an optional script, a note for Claude, and one button.
+- **New video**: the raw take, its language (or Auto), an optional script, a note for Claude, and one button.
 - **The editor**: the video in the middle, the transcript on the left with every cut word struck through (select
   words to cut them or bring them back), Claude, your notes and the facts on the right, the timeline below. Notes are
   pinned to a moment and go to Claude together. Claude's questions show up as cards.

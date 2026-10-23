@@ -55,6 +55,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[2] / "lib"))
+from mm.lang import SENT_END  # noqa: E402
 from mm.links import AUDIO_EXT  # noqa: E402
 
 SOURCES = [f"source{e}" for e in (".mp4", ".mov", ".mkv", ".webm", ".m4v") + AUDIO_EXT]
@@ -127,7 +128,7 @@ def sentences(toks):
     """[{a, b, start, end, text}] over word tokens (audio events ride along inside)."""
     out, a = [], 0
     for i in range(1, len(toks) + 1):
-        end = i == len(toks) or toks[i - 1]["text"].strip().endswith((".", "?", "!")) \
+        end = i == len(toks) or toks[i - 1]["text"].strip().endswith(SENT_END) \
             or toks[i]["start"] - toks[i - 1]["end"] >= SENT_GAP_S
         if end:
             words = [t for t in toks[a:i] if t["type"] == "word"]
@@ -146,7 +147,7 @@ def opens(s):
 def closes(s):
     """Can a clip end here? On a finished sentence, not one cut off ("and it would know- ...")."""
     t = s["text"].rstrip()
-    return t.endswith((".", "?", "!")) and not t.endswith(("...", "-", "..")) and len(t.split()) >= 3
+    return t.endswith(SENT_END) and not t.endswith(("...", "-", "..")) and len(t.split()) >= 3
 
 
 def windows(sents, lo, hi):

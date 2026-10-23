@@ -379,7 +379,7 @@ def seam_dedupe(words):
     ("Zuhause. Zuhause."). Two neighbours with the same letters, from different windows, overlapping in time (or
     under 0.3 s apart): the second goes. A real repeat comes from one window, so it stays."""
     import re as _re
-    key = lambda w: _re.sub(r"[\W_]", "", w["text"].lower())   # noqa: E731
+    key = lambda w: _re.sub(rf"[^{L.WCH}]|_", "", w["text"].lower())   # noqa: E731  (\\W: का and की were one word)
     out = []
     for w in words:
         p = out[-1] if out else None

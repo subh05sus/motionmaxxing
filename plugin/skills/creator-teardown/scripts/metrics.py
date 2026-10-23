@@ -30,7 +30,7 @@ def load(p):
 
 
 def sentences(text):
-    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
+    return [s.strip() for s in re.split(r"(?<=[.!?\u0964\u0965])\s+", text.strip()) if s.strip()]
 
 
 def video_metrics(d, words, meta):

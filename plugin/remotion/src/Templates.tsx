@@ -172,7 +172,7 @@ const SocialPost: React.FC<TP> = ({ p, w, h, look, m, fonts, dur }) => {
   let text = full, cw = Math.min(w * 0.92, h * 1.5);
   let size = fit(text, cw * 0.86, 5, fonts.body, 500, Math.min(h * 0.13, cw * 0.075), 0, h * 0.5, 1.32);
   const READ = Math.min(FW, FH) * 0.05;
-  const sents = full.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
+  const sents = full.split(/(?<=[.!?।॥])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
   const si = hl ? sents.findIndex((x) => x.toLowerCase().includes(hl.toLowerCase())) : -1;
   const compact = p.excerpt !== false && size < READ && si >= 0 && sents.length > 1;
   if (compact) {

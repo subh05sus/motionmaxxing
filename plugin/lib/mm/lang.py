@@ -42,6 +42,9 @@ DEFAULT = "en"
 # nasal marks and digits (Python's \\w takes the signs for punctuation). The danda (।) stays punctuation.
 WCH = r"\w\u0300-\u036f\u0900-\u0963\u0966-\u097f\ua8e0-\ua8ff\u1cd0-\u1cff"
 LATIN_SHARE_HINGLISH = 0.12   # auto-detected Hindi with this share of words in Latin letters is Hinglish
+# A sentence ends at . ? ! and at Hindi's danda (। ॥), which Whisper writes for Hindi; a clause at , ; : too
+SENT_END = (".", "?", "!", "\u0964", "\u0965")
+CLAUSE_END = SENT_END + (",", ";", ":")
 
 
 class Pack:
@@ -166,6 +169,47 @@ HINGLISH = Pack("hinglish", script="latn",
                 filler_prompt="तो दोस्तों, अम्म, मतलब, basically, हाँ तो, एक second, रुको, sorry, फिर से बोलता हूँ। "
                               "आज हम AI tools के बारे में बात करेंगे।",
                 **_HI)
+
+# What a sentence is doing, for a beat's motion graphic (edit route.py motion_kind, motion.py promote_type): regex
+# phrases matched between spaces on lower-case words with the punctuation out, so they bound Devanagari too. A digit
+# is a number in every language.
+EN.motion = dict(
+    versus=["before", "after", "instead", "versus", "vs", "used to", "compared", "better than", "worse than",
+            "faster than"],
+    number=["hundred", "thousand", "million", "billion", "percent", "half", "double", "twice", "times"],
+    steps=["first", "second", "third", "then", "next", "finally", "step"],
+    flow=["sends?", "goes to", "passes", "hands?", r"from \S+ to", "into", "pipeline", "workflow", "connects?"],
+    ui=["drag", "click", "type", "upload", "render(?:s|ing)?", "cut(?:s|ting)?", "open", "install", "run(?:s|ning)?",
+        "press"],
+    and_or=["and", "or"],
+)
+DE.motion = dict(
+    versus=["vorher", "nachher", "statt", "anstatt", "stattdessen", "früher", "im vergleich", "verglichen", "versus",
+            "vs", r"(?:besser|schlechter|schneller|langsamer|günstiger|billiger|teurer) als"],
+    number=["hundert", "tausend", "millionen?", "milliarden?", "prozent", "hälfte", "doppelt", "doppelte",
+            r"\w+mal so"],
+    steps=["erstens", "zweitens", "drittens", "zuerst", "als erstes", "dann", "danach", "als nächstes", "anschließend",
+           "schließlich", "zum schluss", "schritt"],
+    flow=["schickt", "schicken", "sendet", "geht an", "gibt (?:es )?weiter", "übergibt", "landet in", "pipeline",
+          "workflow", "verbindet", "verbinden", r"von \S+ (?:zu|nach|in)"],
+    ui=["klick(?:e|st|en)?", "zieh(?:e|st|en)?", "tipp(?:e|st|en)?", "hochladen", "lädst", "rendern", "schneiden",
+        "öffne(?:st|n)?", "installier(?:e|st|en)?", "start(?:e|est|en)", "drück(?:e|st|en)?"],
+    and_or=["und", "oder"],
+)
+HI.motion = HINGLISH.motion = dict(   # Hindi in either script, and the English that Hinglish mixes in
+    versus=["की जगह", "के बजाय", "बनाम", "तुलना में", r"से (?:बेहतर|तेज़|तेज|सस्ता|अच्छा)", "ki jagah", "ke bajaye",
+            "banaam", "tulna mein", r"se (?:behtar|tez|sasta|accha|achha|better|faster)", *EN.motion["versus"]],
+    number=["सौ", "हज़ार", "हजार", "लाख", "करोड़", "करोड", "प्रतिशत", "परसेंट", "आधा", "दोगुना", "गुना", "sau", "hazaar",
+            "hazar", "lakh", "crore", "karod", "pratishat", "aadha", "doguna", "guna", *EN.motion["number"]],
+    steps=["पहला", "पहले", "दूसरा", "तीसरा", "फिर", "उसके बाद", "इसके बाद", "आखिर में", "आख़िर में", "कदम", "स्टेप", "pehla",
+           "pehle", "doosra", "dusra", "teesra", "tisra", "phir", "fir", "uske baad", "iske baad", "aakhir mein",
+           "kadam", *EN.motion["steps"]],
+    flow=["भेजता", "भेजती", "भेजते", "भेजो", "पहुँचता", "पहुंचता", "जोड़ता", "जोड़ो", "bhejta", "bhejti", "bhejo",
+          "pahunchta", "jodta", "jodo", *EN.motion["flow"]],
+    ui=["क्लिक", "ड्रैग", "अपलोड", "इंस्टॉल", "खोलो", "खोलें", "दबाओ", "दबाएं", "टाइप", "kholo", "kholein", "dabao",
+        "dabaye", *EN.motion["ui"]],
+    and_or=["और", "या", "aur", "ya", *EN.motion["and_or"]],
+)
 
 PACKS = {"en": EN, "de": DE, "hi": HI, "hinglish": HINGLISH}
 NAMES = {"en": "English", "de": "German", "hi": "Hindi", "hinglish": "Hinglish"}

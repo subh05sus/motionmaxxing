@@ -265,8 +265,9 @@ whatever the font does.
 ## Type
 
 66 open-licensed families ship with the skill in `assets/fonts` (sans, display, serif, handwritten, mono,
-rounded), all drawing German with their own glyphs (`npm run fonts -- check`). Nothing is fetched while rendering:
-a clip carries only the fonts it uses.
+rounded), all drawing German with their own glyphs (`npm run fonts -- check`). Hindi: every stack falls back to
+Noto Sans Devanagari (`fonts/noto-sans-devanagari`, Devanagari only), so Devanagari text draws in any pairing; set
+it as it is, never in Latin letters. Nothing is fetched while rendering: a clip carries only the fonts it uses.
 
 A **pairing** sets the headline, body, accent and mono together, plus how the headline is set (weight,
 tracking, capitals). Put `data-type="<id>"` on a beat's root, or `"type"` in `reel.json` for every beat:
