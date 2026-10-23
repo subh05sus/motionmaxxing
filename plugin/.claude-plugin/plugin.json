@@ -2,7 +2,7 @@
   "name": "motionmaxxing",
   "displayName": "motionmaxxing",
   "description": "A script and a raw recording in, a finished short-form video out: a German-first cut that keeps the last good take, motion graphics per beat, real proof on screen, review and export. Runs on your own Claude login.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": { "name": "Subhadip Saha" },
   "repository": "https://github.com/subh05sus/motionmaxxing",
   "license": "MIT",
