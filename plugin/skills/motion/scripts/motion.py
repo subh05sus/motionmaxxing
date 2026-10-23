@@ -752,6 +752,8 @@ def demo():
     ws = [{"text": "Schritt", "start": 1.0, "end": 1.3}, {"text": "eins,", "start": 1.3, "end": 1.6}, {"text": "Schritt", "start": 4.1, "end": 4.4},
           {"text": "zwei.", "start": 4.4, "end": 4.8}]
     assert first_word(ws, 4.0) == ("Schritt", 2, 4.1) and first_word(ws, 9.0) is None
+    # the mascot pack ships with the kit: its 70 poses, found by tag
+    assert len(kit_poses()) == 70 and "idea-lightbulb" in [p[0] for p in kit_poses("idea")], kit_poses("idea")
     # retime: after a re-cut each clip finds its words again (a fragment cut 0.8 s before the second line), moves with
     # them, and the clips run back to back; index.html's words and length follow
     with tempfile.TemporaryDirectory() as t:
@@ -911,6 +913,13 @@ KIT_GROUND = "#F4F4F2"          # the edit's half-screen ground: the clip and th
 KIT_FONTS = (("Inter Tight", "inter-tight", (("inter-tight-normal.woff2", "normal", "100 900"), ("inter-tight-italic.woff2", "italic", "100 900"))),
              ("Instrument Serif", "instrument-serif", (("instrument-serif-normal-400.woff2", "normal", "400"), ("instrument-serif-italic-400.woff2", "italic", "400"))),
              ("JetBrains Mono", "jetbrains-mono", (("jetbrains-mono-normal.woff2", "normal", "100 800"),)))
+
+
+def kit_poses(tag=None):
+    """The mascot pack's poses for RC.clawd.pose (ui/82-clawd-pack.js): [(id, name, tags)], only those with `tag` when given."""
+    s = (KIT / "ui" / "82-clawd-pack.js").read_text(encoding="utf-8")
+    poses, _ = json.JSONDecoder().raw_decode(s, s.index("RC.clawd.POSES = ") + len("RC.clawd.POSES = "))
+    return [(p["id"], p["name"], p.get("tags") or []) for p in poses.values() if not tag or tag in (p.get("tags") or [])]
 
 
 def kit_assets(d):
@@ -1226,6 +1235,7 @@ def main():
     po = sub.add_parser("portrait")
     po.add_argument("edit")
     po.add_argument("--at", type=float)
+    sub.add_parser("poses", help="the mascot pack's poses for RC.clawd.pose (kit/docs/clawd.md)").add_argument("--tag")
     sub.add_parser("demo")
     a = ap.parse_args()
     if a.cmd == "pick":
@@ -1258,6 +1268,9 @@ def main():
         align(a.edit)
     elif a.cmd == "portrait":
         portrait(a.edit, a.at)
+    elif a.cmd == "poses":
+        for pid, _, tags in kit_poses(a.tag):
+            print(f"{pid:<34} {', '.join(tags)}")
     else:
         demo()
 

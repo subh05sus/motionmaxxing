@@ -158,7 +158,7 @@ A user's own style skill gets bespoke animations with one line: "Animations: use
   `check_composition.py`, `measure_ink.py`, `clip_motion.py`: each with a `demo` self-check.
 - `template/`: the HyperFrames composition every clip starts from. `kit/`: the kit engine's kit (reelcut's design kit:
   kit.css, kit.js, ui/ families, the Inter Tight, Instrument Serif and JetBrains Mono fonts under the OFL, `clip.html`,
-  `docs/` its reference); the mascot pack's poses are not shipped.
+  `docs/` its reference), with the mascot pack's 70 poses in `ui/82-clawd-pack.js` (`motion.py poses --tag idea`).
 - `scripts/verify.mjs`: the four proofs (clipped, rails, neighbour, reading), frame by frame in Chrome.
 - `references/`: `clip-brief-card.md` (the core every agent reads), `visual-system.md`, `build-loop.md`,
   `scenes.md`, `looks.md`, `fifty-fifty.md`, `board.md`.

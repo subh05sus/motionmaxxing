@@ -69,7 +69,8 @@ Motion:
 
 Clawd (reels about Claude, or as a host): `RC.clawd(".cam", { x, y, size })`, then `enter`, `look`, `jump`,
 `wave`, `hold` / `drop` (a file into a chat), `carry`, `react`, `dress`, `confetti`, `life` last. Same size and
-ground line from beat to beat. `pose` is not available (its pack is not shipped).
+ground line from beat to beat. `pose(tl, c, at, id)` plays one of the mascot pack's 70 poses (`motion.py poses --tag
+idea` lists them).
 
 ## 4. Check, place, align, render
 

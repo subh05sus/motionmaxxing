@@ -1,4 +1,4 @@
-> The kit's reference, from reelcut. In motionmaxxing the kit is loaded into every kit clip by `motion.py scaffold` (references/kit-clips.md): the `npm run …` commands, `reel.json` and the personality styles below are reelcut's own and do not apply here; `RC.clawd.pose` (the mascot pack) is not shipped.
+> The kit's reference, from reelcut. In motionmaxxing the kit is loaded into every kit clip by `motion.py scaffold` (references/kit-clips.md): the `npm run …` commands, `reel.json` and the personality styles below are reelcut's own and do not apply here (`npm run clawd -- poses` is `python3 motion.py poses` here).
 
 # Clawd — the Claude mascot, as the reel's host
 
