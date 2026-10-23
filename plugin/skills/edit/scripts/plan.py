@@ -1695,6 +1695,7 @@ SPLIT = {"seam": 50, "ground": "#F4F4F2"}
 CUTOUT_BREAKOUT = 10.6  # 50/50 cutout: the speaker's head rises this far (% of the frame) above the window's top edge
 SPLIT_GAP = 2          # art stops this far above the seam
 SPLIT_CAP_BELOW = 4.5  # captions sit this far under the seam, over the top of the speaker's window
+CAP_LOW_MAX = 78.0     # speaker_down lowers half-screen captions at most this far (check.py: the app UI starts at 78.4%)
 HEAD_ROOM = 4          # the top of the head (hair included) sits this far into the window
 MIN_HEAD = 22          # a head shorter than this is scaled up to it, so a face is never tiny
 MAX_SPEAKER_SCALE = 1.6
@@ -1710,7 +1711,7 @@ def split_art_box(seam, wide=False):
     return [m, t, 100 - 2 * m, seam - SPLIT_GAP - t]
 
 
-def speaker_frame(face, seam, head_room=HEAD_ROOM, keep=False):
+def speaker_frame(face, seam, head_room=HEAD_ROOM, keep=False, down=0.0):
     """How the cut sits in the window under the seam: scaled so the head is at least MIN_HEAD tall,
     moved so the hair sits HEAD_ROOM below the window's top and the head is centred left to right.
     keep (a half screen per beat): the speaker stays where the camera has him and the panel covers the top half,
@@ -1731,6 +1732,8 @@ def speaker_frame(face, seam, head_room=HEAD_ROOM, keep=False):
     fl = keep and face_lines(face)
     if fl:   # the eyes where they are on the full frame (y = seam at scale 1), never closer than EYE_ROOM to the seam
         y = min(max(0, min(seam + (k - 1) * fl[0], k * fl[0] - EYE_ROOM)), k * 100 - win)
+    if down:   # style.json layout.speaker_down: the video sits this much lower in the window (the hair clear of the seam)
+        y = max(0.0, y - down)
     x = min(max(0, k * cx - 50), k * 100 - 100)
     if k * bottom - y > win:
         print("warning: the head is taller than the split window; the chin is cut off", file=sys.stderr)
@@ -2731,7 +2734,8 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
         if per_beat:
             # "half the screen" means half: a measured panel seam (a creator's graphics zone) is for a whole-video split
             seam = max(seam, SPLIT["seam"])
-            split_y = cap["y_pct"]     # the speaker stays where he is (speaker_frame keep), so do his captions
+            # the speaker stays where he is (speaker_frame keep), so do his captions; lowered with him by speaker_down
+            split_y = round(min(cap["y_pct"] + float(lay.get("speaker_down") or 0), max(cap["y_pct"], CAP_LOW_MAX)), 2)
         art = split_art_box(seam, wide=per_beat)
         cap["y_pct"] = split_y
         # a logo is dropped while a scene or a panel card is up (the frame is already showing the visual)
@@ -2741,7 +2745,8 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
             panel = face_every(panel, float(lay["face_every_s"]))
         out = {**head, "layout": {"mode": "split", "ground": lay["ground"], "seam": seam, "art": art,
                                   "speaker": speaker_frame(face, seam, -(CUTOUT_BREAKOUT - 2) if lay.get("variant") == "cutout" else HEAD_ROOM,
-                                                           keep=per_beat and lay.get("variant") != "cutout"),
+                                                           keep=per_beat and lay.get("variant") != "cutout",
+                                                           down=float(lay.get("speaker_down") or 0)),
                                   "caption_full_y": over_y,
                                   **({"variant": "cutout", "breakout": CUTOUT_BREAKOUT} if lay.get("variant") == "cutout" else {})}}
     else:
@@ -2773,6 +2778,25 @@ def build(style, words, meta, images=(), aspect="auto", cuts=(), visuals=(), edi
         if per_beat:
             c["panel"] = c["_grp"] == "panel"   # the renderer opens the panel for these beats only
         c.pop("_grp", None)
+    if split_now and lay.get("panel_zooms") in ("from_head", "from_eyes") and face:
+        # style.json layout.panel_zooms "from_head": a punch-in while the half screen is open grows from the top of the
+        # head, so the hair holds its place under the seam and the face moves down into the window (never up out of it)
+        runs = [(c["start"] - PANEL_T, c["end"] + PANEL_T) for c in cards if c.get("panel") or (not per_beat and c.get("layout") not in ("scene", "background"))]
+        for z in zooms:
+            hd = any(a < z["end"] and z["start"] < b for a, b in runs) and head_during(face["heads"], face.get("step_s", 0.5), z["start"], z["end"])
+            if hd:
+                fl = lay["panel_zooms"] == "from_eyes" and face_lines(face, z["start"], z["end"])
+                z["origin"] = [round((hd[0] + hd[2]) / 2, 1), round(fl[0] if fl else max(0.0, hd[1] - 1), 1)]
+                if lay.get("panel_zoom_scale"):   # a gentler punch in the window, so the mouth stays over the captions
+                    z["scale"] = min(z["scale"], float(lay["panel_zoom_scale"]))
+    if split_now and lay.get("panel_zooms") is False:
+        # style.json layout.panel_zooms false: no punch-in while the half screen is open (in the window a zoom pushes
+        # the hair out of its top or the mouth onto the captions); the panel opening is the move there
+        runs = [(c["start"] - PANEL_T, c["end"] + PANEL_T) for c in cards if c.get("panel") or (not per_beat and c.get("layout") not in ("scene", "background"))]
+        kept = [z for z in zooms if not any(a < z["end"] and z["start"] < b for a, b in runs)]
+        if len(kept) < len(zooms):
+            print(f"note: {len(zooms) - len(kept)} zoom(s) dropped while the half screen is open (layout.panel_zooms false)", file=sys.stderr)
+        zooms = kept
     mix_note(cards)
     for c in cards:
         px = c.get("layout") != "scene" and c.get("size") and capture_xh(c, aspect)
