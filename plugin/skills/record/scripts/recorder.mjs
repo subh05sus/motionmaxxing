@@ -108,8 +108,14 @@ async function launch({ headless = false, viewport = true } = {}) {
 function plainChrome(url) {
   fs.mkdirSync(PROFILE, { recursive: true });
   unlockProfile();
-  return spawn(findChrome(), [`--user-data-dir=${PROFILE}`, "--no-first-run", "--no-default-browser-check",
+  const chrome = spawn(findChrome(), [`--user-data-dir=${PROFILE}`, "--no-first-run", "--no-default-browser-check",
     "--password-store=basic", "--use-mock-keychain", "--hide-crash-restore-bubble", "--new-window", url], { stdio: "ignore" });
+  // started from the studio's background process, the window opened behind the user's other windows: once it is up,
+  // bring that Chrome to the front (macOS; System Events asks once, and without it nothing happens)
+  if (process.platform === "darwin") setTimeout(() => spawn("osascript", ["-e",
+    `tell application "System Events" to set frontmost of (first process whose unix id is ${chrome.pid}) to true`],
+  { stdio: "ignore" }).on("error", () => {}), 2500);
+  return chrome;
 }
 
 /** Blur personal data live: the shot list's selectors, and any text that is an email, phone number, key or IBAN. */
