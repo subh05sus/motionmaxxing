@@ -7,7 +7,7 @@ import { api, useApi, useEvents } from "@/lib/api";
 import { LANG_OPTIONS, type LangChoice } from "@/lib/langs";
 import { navigate, useRoute } from "@/lib/router";
 import { toast } from "@/lib/toast";
-import { isVideo, uploadClips, useUploads, type Upload } from "@/lib/uploads";
+import { droppedVideos, isVideo, uploadClips, useUploads, type Upload } from "@/lib/uploads";
 import { clock, cn } from "@/lib/utils";
 import type { PageProps } from "@/app";
 
@@ -69,7 +69,7 @@ export function NewVideoPage({ setTitle }: PageProps) {
         {!id ? <DropZone onFiles={add} busy={busy} progress={firstPct} /> : (
           <section className={cn("space-y-1.5 rounded-[14px] transition-colors", over && "bg-primary/8")}
             onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
-            onDrop={(e) => { e.preventDefault(); setOver(false); const fs = [...e.dataTransfer.files].filter(isVideo); if (fs.length) void addMore(fs); }}>
+            onDrop={(e) => { e.preventDefault(); setOver(false); void droppedVideos(e.dataTransfer).then((fs) => { if (fs.length) void addMore(fs); }); }}>
             <div className="flex items-center justify-between gap-2">
               <label className="flex min-w-0 items-center gap-1.5 headline"><Film className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate">{video?.title ?? "Your video"}</span>
                 <span className="shrink-0 caption font-normal">{clips.length > 1 ? [takes.length && `${takes.length} take${takes.length > 1 ? "s" : ""}`, broll.length && `${broll.length} b-roll`].filter(Boolean).join(" · ") : ""}</span>

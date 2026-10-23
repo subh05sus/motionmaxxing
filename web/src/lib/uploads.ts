@@ -15,6 +15,28 @@ export function useUploads(): Upload[] {
 /** Video files only: a dropped folder's .DS_Store or a script stays out. */
 export const isVideo = (f: File) => f.type.startsWith("video/") || /\.(mov|mp4|m4v|mkv|webm)$/i.test(f.name);
 
+/** The video files of a drop: loose files, and every file in a dropped folder (its subfolders too), by name. The
+ *  entries are taken during the drop event itself: the browser empties the drop once the handler returns. */
+export function droppedVideos(dt: DataTransfer): Promise<File[]> {
+  const entries = [...dt.items].map((i) => i.webkitGetAsEntry?.()).filter((e): e is FileSystemEntry => !!e);
+  const loose = [...dt.files];
+  if (!entries.some((e) => e.isDirectory)) return Promise.resolve(loose.filter(isVideo));
+  const out: File[] = [];
+  const walk = async (e: FileSystemEntry): Promise<void> => {
+    if (e.isFile) { out.push(await new Promise<File>((ok, no) => (e as FileSystemFileEntry).file(ok, no))); return; }
+    const reader = (e as FileSystemDirectoryEntry).createReader();
+    for (;;) {   // a folder reads in batches of up to 100
+      const batch = await new Promise<FileSystemEntry[]>((ok, no) => reader.readEntries(ok, no));
+      if (!batch.length) break;
+      for (const x of batch) if (!x.name.startsWith(".")) await walk(x);
+    }
+  };
+  return (async () => {
+    for (const e of entries) await walk(e);
+    return out.filter(isVideo).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  })();
+}
+
 /** One file into the studio (the body is the file, x-filename its name), with its progress 0..1. */
 export function sendFile(url: string, file: File, onPct: (p: number) => void): Promise<{ id?: string; n?: number; file?: string }> {
   return new Promise((resolve, reject) => {

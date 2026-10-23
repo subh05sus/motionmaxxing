@@ -6,7 +6,7 @@ import { useItemActions } from "@/lib/actions";
 import { api, useApi, useEvents } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { Link } from "@/lib/router";
-import { isVideo, sendFile } from "@/lib/uploads";
+import { droppedVideos, isVideo, sendFile } from "@/lib/uploads";
 import { ago, clock } from "@/lib/utils";
 import type { PageProps } from "@/app";
 
@@ -39,7 +39,7 @@ function BrollSection() {
     { label: "Delete…", icon: <Trash2 className="size-3.5" />, danger: true, run: () => act.del([menu.b.file], menu.b.title) },
   ] : [];
   return (
-    <section onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const fs = [...e.dataTransfer.files].filter(isVideo); if (fs.length) void add(fs); }}>
+    <section onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void droppedVideos(e.dataTransfer).then((fs) => { if (fs.length) void add(fs); }); }}>
       <div className="mb-2 flex items-baseline justify-between">
         <h2 className="title-2">B-roll {data?.length ? <span className="caption font-normal">{data.length} clip{data.length > 1 ? "s" : ""}</span> : null}</h2>
         <button disabled={adding > 0} onClick={() => input.current?.click()} className="flex items-center gap-1 text-primary hover:underline disabled:opacity-50">

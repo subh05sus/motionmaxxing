@@ -1,9 +1,9 @@
 import { Film, Upload } from "lucide-react";
 import { useRef, useState } from "react";
-import { isVideo } from "@/lib/uploads";
+import { droppedVideos, isVideo } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
 
-/** Drop the raw takes here (one, or every part and the b-roll at once), or click to choose them. */
+/** Drop the raw takes here (one, every part and the b-roll at once, or the folder they are in), or click to choose them. */
 export function DropZone({ onFiles, compact, busy, progress }: { onFiles: (f: File[]) => void; compact?: boolean; busy?: boolean; progress?: number }) {
   const [over, setOver] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -12,7 +12,7 @@ export function DropZone({ onFiles, compact, busy, progress }: { onFiles: (f: Fi
     <div
       onDragOver={(e) => { e.preventDefault(); setOver(true); }}
       onDragLeave={() => setOver(false)}
-      onDrop={(e) => { e.preventDefault(); setOver(false); take(e.dataTransfer.files); }}
+      onDrop={(e) => { e.preventDefault(); setOver(false); void droppedVideos(e.dataTransfer).then((fs) => { if (fs.length) onFiles(fs); }); }}
       onClick={() => !busy && input.current?.click()}
       className={cn("relative grid place-items-center overflow-hidden rounded-[14px] border-2 border-dashed text-center transition-colors",
         compact ? "h-36" : "h-60", over ? "border-primary bg-primary/8" : "border-foreground/15 hover:border-foreground/25 hover:bg-foreground/[0.03]")}>
