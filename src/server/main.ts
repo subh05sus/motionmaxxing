@@ -5,6 +5,7 @@ import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { Claude, type Ev, type SessionMeta } from "./claude.js";
 import * as demos from "./demos.js";
+import * as clipsMod from "./clips.js";
 import * as lib from "./library.js";
 import * as scripts from "./scripts.js";
 import * as bin from "./trash.js";
@@ -133,7 +134,12 @@ function cutPrompt(id: string, extra: { instructions?: string; script?: string }
     "and follow it to the end of its step 5, with these settled:",
     "",
     `- Edit folder: ${d}`,
-    `- The raw take: ${r.source}`,
+    ...(r.takes && r.takes.length > 1 ? [
+      `- The raw takes, in the order the video goes (the user dropped ${r.takes.length} clips: takes and parts of one talk):`,
+      ...r.takes.map((t, i) => `  ${i + 1}. ${t}`),
+      "  Join them in this order into edits/<name>/source.mp4 with join.py first (step 0a) and cut that: one video made of all of",
+      "  them. A line said in two clips is a retake like any other: the last good take wins.",
+    ] : [`- The raw take: ${r.source}`]),
     ...(extra.script ? [`- The user's script: ${extra.script} (pass it to transcribe.py and run script_match.py)`] : []),
     "- First `taste.py show --edit` as the skill says: the user's learned cut taste (pause length) is in it.",
     "- A phone or WhatsApp clip has a variable frame rate: make edits/<name>/source.mp4 with join.py first (step 0a), and cut that.",
@@ -162,7 +168,7 @@ function ownStyle(): string | null {
 }
 
 function editPrompt(id: string): string {
-  const d = lib.editDir(id);
+  const d = lib.editDir(id), r = lib.record(id);
   const own = ownStyle();
   return [
     "The user approved the cut in the motionmaxxing studio. Make the edit with the motionmaxxing edit skill (load it with",
@@ -172,6 +178,11 @@ function editPrompt(id: string): string {
     own ? `- The style: the owner's own measured style, ${path.join(LIBRARY, "creator-teardowns", own, "style.json")} (copy it to style.json), unless the chat named another.`
         : "- The style: step 1 of the skill picks it.",
     ...langLine(lib.lang(id), "edit"),
+    ...(r.broll?.length ? [
+      `- B-roll the user dropped with this video, saved in the library's b-roll (${clipsMod.BROLL}): ${r.broll.map((f) => path.basename(f)).join(", ")}.`,
+      "  Look at each (broll.py sheet library) and put the ones that show what a line says on that line (copy into images/:",
+      "  a video_card, or the full frame); the rest of the library's b-roll is there for any line too.",
+    ] : []),
     "- Pick the placement per beat and mix them: background (you cut out in front of the visual), half the screen,",
     "  the whole screen, and few small boxes (at most 40%). Real things only: never a text card. Captions are placed by",
     "  plan.py (never on the face, inside the app's safe zone): never set their y by hand.",
@@ -292,6 +303,8 @@ const server = http.createServer(async (req, res) => {
         source = b.path; title = b.title || path.basename(b.path).replace(/\.[^.]+$/, "");
       }
       const id = lib.newEdit(title, source);
+      clipsMod.addClip(id, source, name ?? path.basename(source));
+      clipsMod.classifySoon(id, () => broadcast("video", { id }));
       broadcast("video", { id });
       return sendJson(res, 201, { id });
     }
@@ -304,9 +317,53 @@ const server = http.createServer(async (req, res) => {
         const c = r.session ? claude.get(r.session) : undefined;
         return sendJson(res, 200, { ...lib.summary(id), transcript: lib.transcript(id), plan: lib.plan(id), notes: lib.notes(id), job: jobs.get(id) ?? null, chat: c ? { id: c.id, status: c.status } : null });
       }
+      // more clips dropped onto the same new video (takes, parts, b-roll), each checked like the first
+      if (action === "files" && m === "POST" && !seg[4]) {
+        const name = decodeURIComponent(String(req.headers["x-filename"] ?? "clip.mp4"));
+        mkdirSync(VIDEOS, { recursive: true });
+        const ext = path.extname(name) || ".mp4";
+        let f = path.join(VIDEOS, slug(name) + ext), n = 2;
+        while (existsSync(f)) f = path.join(VIDEOS, `${slug(name)}-${n++}${ext}`);
+        await new Promise<void>((resolve, reject) => { const w = createWriteStream(f); req.pipe(w); w.on("finish", resolve); w.on("error", reject); });
+        const at = clipsMod.addClip(id, f, name);
+        clipsMod.classifySoon(id, () => broadcast("video", { id }));
+        broadcast("video", { id });
+        return sendJson(res, 201, { n: at });
+      }
+      if (action === "files" && m === "GET" && seg[4] && seg[5] === "poster") {   // a dropped clip's thumbnail
+        const c = clipsMod.clips(id)[Number(seg[4])];
+        const f = c ? await clipsMod.clipPoster(id, c.path) : undefined;
+        return f ? sendFile(req, res, f) : void res.writeHead(404).end();
+      }
+      if (action === "files" && m === "POST" && seg[4]) {
+        const b = await body(req), n = Number(seg[4]);
+        if (lib.record(id).session) return sendJson(res, 409, { error: "the cut has started: its clips are set" });
+        try {
+          if (b.remove) {
+            const c = clipsMod.removeClip(id, n);
+            if (path.resolve(c.path).startsWith(VIDEOS + path.sep)) bin.trash("video", path.basename(c.path), c.name, [c.path]);
+          } else clipsMod.setClip(id, n, { kind: b.kind === "broll" ? "broll" : b.kind === "take" ? "take" : undefined, move: Number(b.move) || 0 });
+        } catch (e) { return sendJson(res, 400, { error: (e as Error).message }); }
+        broadcast("video", { id });
+        return sendJson(res, 200, lib.summary(id));
+      }
       if (action === "start" && m === "POST") {
         const b = await body(req);
         const r = lib.record(id);
+        // the clips: takes in order (two or more are joined before the cut), b-roll into the library's b-roll
+        const cl = clipsMod.clips(id);
+        // one clip is the take, whatever it looks like (no waiting for its check); several wait for theirs
+        if (cl.length > 1 && cl.some((c) => c.kind === "pending")) return sendJson(res, 409, { error: "still checking the clips: a moment" });
+        const takes = cl.length === 1 ? cl : cl.filter((c) => c.kind === "take");
+        if (!takes.length) return sendJson(res, 400, { error: "no take: mark the clips of you talking as takes" });
+        const saved = cl.filter((c) => c.kind === "broll" && !takes.includes(c)).map((c) => {
+          try { return clipsMod.saveBroll(c.path, c.name.replace(/\.[^.]+$/, ""), { id, title: r.title }, c.duration); }
+          catch { return c.path; }   // gone, or on another disk: the edit can still read it where it is
+        });
+        r.files = cl.map((c) => (c.kind === "broll" && !takes.includes(c) ? { ...c, path: saved.shift() ?? c.path } : c));
+        r.broll = r.files.filter((c) => c.kind === "broll" && !takes.includes(c)).map((c) => c.path);
+        r.source = takes[0]!.path;
+        r.takes = takes.length > 1 ? takes.map((c) => c.path) : undefined;
         let script: string | undefined;
         if (b.script && String(b.script).trim()) {
           script = path.join(lib.editDir(id), "script.md");
@@ -391,8 +448,9 @@ const server = http.createServer(async (req, res) => {
         if (jobs.has(id)) return sendJson(res, 409, { error: "it is being rebuilt; try again in a moment" });
         const r = lib.record(id);
         if (r.session) claude.stop(r.session);
-        const src = r.source && path.resolve(r.source).startsWith(VIDEOS + path.sep) ? r.source : undefined;
-        const d = bin.trash("video", id, r.title, [lib.editDir(id), ...(src ? [src] : [])]);
+        const own = [...new Set([r.source, ...(r.files ?? []).filter((c) => c.kind !== "broll").map((c) => c.path)])]
+          .filter((f): f is string => !!f && path.resolve(f).startsWith(VIDEOS + path.sep));
+        const d = bin.trash("video", id, r.title, [lib.editDir(id), ...own]);
         broadcast("video", { id });
         return sendJson(res, 200, d);
       }
@@ -607,6 +665,35 @@ const server = http.createServer(async (req, res) => {
         taste: { text: taste.out.split(/\n\{\n/)[0]!.trim(), settings },
       });
     }
+    // the library's b-roll: what New video saved, what was added here, and any clip put in the folder by hand
+    if (p === "/api/broll" && m === "GET") return sendJson(res, 200, clipsMod.brollList());
+    if (p === "/api/broll" && m === "POST") {
+      const name = path.basename(decodeURIComponent(String(req.headers["x-filename"] ?? "b-roll.mp4")));
+      mkdirSync(clipsMod.BROLL, { recursive: true });
+      const tmp = path.join(clipsMod.BROLL, `.incoming-${Date.now()}${path.extname(name) || ".mp4"}`);
+      await new Promise<void>((resolve, reject) => { const w = createWriteStream(tmp); req.pipe(w); w.on("finish", resolve); w.on("error", reject); });
+      const f = clipsMod.saveBroll(tmp, name.replace(/\.[^.]+$/, ""));
+      broadcast("broll", {});
+      return sendJson(res, 201, { file: path.basename(f) });
+    }
+    if (seg[0] === "api" && seg[1] === "broll" && seg[2]) {
+      const file = path.basename(seg[2]), action = seg[3], f = path.join(clipsMod.BROLL, file);
+      if (action === "poster") { const x = await clipsMod.brollPoster(file); return x ? sendFile(req, res, x) : void res.writeHead(404).end(); }
+      if (!existsSync(f)) return sendJson(res, 404, { error: "that clip is not in the library any more" });
+      if (action === "rename" && m === "POST") {
+        const b = await body(req);
+        if (!String(b.title ?? "").trim()) return sendJson(res, 400, { error: "give it a name" });
+        const to = clipsMod.renameBroll(file, String(b.title).slice(0, 80));
+        broadcast("broll", {});
+        return sendJson(res, 200, { file: to });
+      }
+      if (action === "delete" && m === "POST") {
+        const title = clipsMod.brollList().find((x) => x.file === file)?.title ?? file;
+        const d = bin.trash("broll", file, title, [f]);
+        broadcast("broll", {});
+        return sendJson(res, 200, d);
+      }
+    }
     if (p === "/api/library" && m === "GET") {
       const disk = await py<{ library: number; working: number; free: number }>(`from mm import library\nprint(json.dumps(library.disk()))`);
       const edits = await py<{ id: string; bytes: number }[]>(`from mm import library\nfrom pathlib import Path\nd = Path(${JSON.stringify(EDITS)})\nprint(json.dumps([{"id": e.name, "bytes": library.size(e)} for e in sorted(d.iterdir()) if e.is_dir() and not e.name.startswith(".")] if d.is_dir() else []))`);
@@ -619,6 +706,12 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/reveal" && m === "POST") {
       const b = await body(req);
+      if (b.broll) {   // a b-roll clip, selected in its Finder window
+        const f = path.join(clipsMod.BROLL, path.basename(String(b.broll)));
+        if (!existsSync(f)) return sendJson(res, 404, { error: "not there any more" });
+        spawn("open", ["-R", f], { stdio: "ignore", detached: true }).unref();
+        return sendJson(res, 200, { ok: true });
+      }
       const target = b.id ? lib.editDir(String(b.id)) : LIBRARY;
       if (!existsSync(target)) return sendJson(res, 404, { error: "not there any more" });
       spawn("open", [target], { stdio: "ignore", detached: true }).unref();
@@ -666,6 +759,8 @@ try {
     const id = String(f ?? "").split(path.sep)[0];
     if (id && !id.startsWith(".")) broadcast("script", { id });
   });
+  mkdirSync(clipsMod.BROLL, { recursive: true });
+  watch(clipsMod.BROLL, (_ev, f) => { if (f && !String(f).startsWith(".")) broadcast("broll", {}); });
   const prog = path.join(HOME, "progress");
   mkdirSync(prog, { recursive: true });
   watch(prog, () => broadcast("setup", {}));

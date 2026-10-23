@@ -4,13 +4,13 @@ import path from "node:path";
 import { LIBRARY } from "./paths.js";
 
 /**
- * Recently deleted: a deleted video, demo or script moves into <library>/.trash/<key>/ with what it was and where it
+ * Recently deleted: a deleted video, demo, script or b-roll clip moves into <library>/.trash/<key>/ with what it was and where it
  * came from, so Undo and Restore put it back exactly. "Delete forever" hands it to the Mac's Trash (Finder can
  * still put it back from there). Nothing is ever removed with rm.
  */
 
 export const TRASH = path.join(LIBRARY, ".trash");
-export type Kind = "video" | "demo" | "script";
+export type Kind = "video" | "demo" | "script" | "broll";
 export interface Deleted { key: string; kind: Kind; id: string; title: string; at: string; items: { from: string; name: string }[] }
 
 const meta = (key: string): Deleted | null => {

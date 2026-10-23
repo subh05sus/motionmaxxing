@@ -39,7 +39,7 @@ No venv yet: run the `setup` skill first. `S="${CLAUDE_SKILL_DIR}/scripts"`.
 
 Ask for their take's path. Several files: `references/takes.md`.
 
-## 0a. A phone or WhatsApp clip: make the source
+## 0a. A phone or WhatsApp clip, or several takes: make the source
 
 A phone, screen recording or WhatsApp clip often has a variable frame rate (`ffprobe` shows `r_frame_rate` like
 `600/19`), and render.py then refuses ("frame mismatch"). Make a constant-rate source first, and use it as
@@ -47,7 +47,13 @@ A phone, screen recording or WhatsApp clip often has a variable frame rate (`ffp
 
 ```bash
 python3 "$S/join.py" edits/<name>/source.mp4 <their file>      # one clip: 30 fps, 48 kHz, sync checked
+python3 "$S/join.py" edits/<name>/source.mp4 take1.mp4 take2.mp4 ...   # several: one source, in the order given
 ```
+
+A video recorded in parts or in many takes (the studio's New video takes every clip at once): join the takes in
+their order (the studio's, else their recording time: `--sort created`) and cut the joined source as one take. A
+line said in two clips is a retake like any other: the last good one wins. `footage.py classify <clips>` tells takes
+(the speaker at the camera) from b-roll when the user handed over a folder: b-roll is never joined into the talk.
 
 ## 0. Ask: the cut first, or everything at once
 

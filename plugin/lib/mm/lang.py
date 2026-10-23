@@ -232,6 +232,23 @@ def key(w, code=None):
     return hindi.key(w) if pack(code).numbers == "hi" else str(w).lower()
 
 
+def script_language(text):
+    """The language a script is in when it is Hindi: "hi" (Devanagari) or "hinglish" (Hindi words in Roman letters,
+    English mixed in), else None and the take's sound decides. A Hinglish take that opens in English is heard as
+    English, and Whisper's "en" translates the Hindi after it: the script knows better. Roman Hindi words are counted
+    only when they are not English or German words too ("to", "is", "mein" are)."""
+    toks = re.findall(rf"[{WCH}']+", hindi.clean(text).lower())
+    if len(toks) < 8:
+        return None
+    deva = sum(1 for t in toks if hindi.has_deva(t))
+    if deva / len(toks) >= 0.3:
+        return "hi"
+    roman = ({v.lower() for v in hindi.COMMON.values()} | set(hindi.ROMAN) | {w for w in _HI_STOP | _HI_COMMON if re.fullmatch(r"[a-z]+", w)}
+             | {x for v in HINGLISH.motion.values() for x in v if re.fullmatch(r"[a-z]+", x)}) - EN.common - EN.stop - DE.common - DE.stop
+    hindi_words = deva + sum(1 for t in toks if t in roman)
+    return "hinglish" if hindi_words / len(toks) >= 0.08 else None
+
+
 def latin_share(words):
     """The share of a transcript's words written in Latin letters: English words in Hindi speech."""
     ws = [w for w in (x if isinstance(x, str) else x.get("text", "") for x in words) if re.search(r"\w", w)]
@@ -343,8 +360,10 @@ def keyterms(text, code=None):
     German rarely spells (Claude, Cursor), not a common word."""
     P = pack(code)
     text = hindi.clean(text)
-    toks = [(m.group(0), not text[:m.start()].rstrip() or text[:m.start()].rstrip().endswith(SENT_END))
-            for m in re.finditer(rf"[{WCH}][{WCH}.+#'-]*[{WCH}+#]|[{WCH}]", text)]   # (word, starts a sentence)
+    # (word, starts a sentence): after . ? ! । or at a new line (a script's line is a sentence, full stop or not)
+    toks = [(m.group(0), not text[:m.start()].rstrip() or text[:m.start()].rstrip().endswith(SENT_END)
+             or "\n" in text[:m.start()][len(text[:m.start()].rstrip()):])
+            for m in re.finditer(rf"[{WCH}][{WCH}.+#'-]*[{WCH}+#]|[{WCH}]", text)]
     # a Hinglish script in Roman letters: its Hindi words are Latin too, so a name is what English capitalises
     roman = P.numbers == "hi" and latin_share([w for w, _ in toks]) > 0.5
     mid_caps = {w.lower() for w, start in toks if not start and w[:1].isupper()}
@@ -363,9 +382,10 @@ def keyterms(text, code=None):
         digit = any(c.isdigit() for c in w)
         latin = bool(re.search(r"[A-Za-z]", w)) and not hindi.has_deva(w)
         if roman:
-            # Doston, dikhaunga, Sirf are Hindi; AI, ChatGPT and a capital mid-sentence (Claude, Base44) are names
+            # Doston, dikhaunga, Sirf are Hindi; AI, ChatGPT and a capital mid-sentence (Claude, Base44) are names;
+            # I'll and I'm are not
             inner = any(c.isupper() for c in w[1:]) and not w.isupper()
-            keep = digit or (latin and (w.isupper() or inner or (w[0].isupper() and (not start or low in mid_caps))))
+            keep = digit or (latin and "'" not in w and (w.isupper() or inner or (w[0].isupper() and (not start or low in mid_caps))))
         elif P.numbers == "hi":
             # Hindi in Devanagari: a name, product or term is in Latin letters (English inside Hindi speech) or has a digit
             keep = digit or (latin and (w[0].isupper() or len(w) > 3))
@@ -413,6 +433,14 @@ def demo():
     got = keyterms("Doston, aaj main aapko dikhaunga ki apna khud ka AI assistant kaise banayein. Sirf 5 easy steps "
                    "mein. Claude Code se app banao, ChatGPT ki zaroorat nahi. Phir Base44 par host karo.", "hinglish")
     assert got == ["AI", "Claude", "Code", "ChatGPT", "Base44"], got
+    got = keyterms("Taaki tumhe docs na padhna padhe\nPehla rule: glass sirf floating cheezon pe.\nComment GLASS and I'll "
+                   "send it to you. Ye Apple ki guidelines", "hinglish")
+    assert got == ["Comment", "GLASS", "Apple"], got    # a line starts a sentence (Pehla), I'll is no name
+    assert script_language("Toh maine pure 2 ghante laga ke Apple ki official design guidelines padhi. And I turned it "
+                           "into a Claude skill. Taaki tumhe docs na padhna padhe") == "hinglish"
+    assert script_language("आज हम Claude Code के बारे में बात करेंगे और देखेंगे कि ये कैसे काम करता है") == "hi"
+    assert script_language("Today I will show you how to build your own assistant in five easy steps, it is easy") is None
+    assert script_language("Heute zeige ich euch, wie ihr in fünf Schritten euren eigenen Assistenten baut, mein Tipp") is None
     with tempfile.TemporaryDirectory() as t:
         assert of(t) == "en"
         assert asked(t) is None

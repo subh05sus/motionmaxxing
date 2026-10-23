@@ -18,6 +18,20 @@ export interface StudioRecord {
   stage: "cut" | "edit" | "done"; approved?: { cut?: string; edit?: string }; session?: string;
   /** The language picked on New video (plugin/lib/mm/lang.py PACKS); none: heard when transcribed. */
   lang?: string;
+  /** Every clip dropped on New video, takes in order first (clips.ts); none: the one source. */
+  files?: Clip[];
+  /** The user moved a take: the clips keep that order (no sorting by recording time). */
+  ordered?: boolean;
+  /** Two or more takes, in order: joined into source.mp4 before the cut. */
+  takes?: string[];
+  /** The b-roll dropped with it, saved in <library>/broll. */
+  broll?: string[];
+}
+
+/** One dropped clip: a take of the talk or b-roll (footage.py), or "pending" while it is being checked. */
+export interface Clip {
+  path: string; name: string; kind: "pending" | "take" | "broll"; why?: string; chosen?: boolean;
+  duration?: number; created?: string | null; speech?: number | null; face?: number | null;
 }
 
 /** The languages the cut reads (plugin/lib/mm/lang.py PACKS). */
@@ -218,7 +232,7 @@ export function summary(id: string) {
     id, title: r.title, createdAt: r.createdAt, updatedAt: new Date(updated || Date.parse(r.createdAt)).toISOString(),
     stage: r.stage, approved: r.approved ?? {}, status: status(id), lang: lang(id),
     seconds: { source: report.duration, cut: report.final_s }, media: media(id), progress: lastProgress(id), working: working(id),
-    session: r.session,
+    session: r.session, files: r.files, broll: r.broll,
   };
 }
 

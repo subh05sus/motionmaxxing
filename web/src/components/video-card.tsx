@@ -11,8 +11,17 @@ export interface VideoSummary {
   id: string; title: string; createdAt: string; updatedAt: string; stage: "cut" | "edit" | "done"; status: string; lang?: string;
   /** What runs on it now, whatever its stage (a render after approval too): the server sees the process. */
   working?: { step: string; detail?: string; progress?: number } | null;
+  /** Every clip dropped on New video: takes in order, then b-roll (the server's clips.ts). */
+  files?: Clip[];
+  broll?: string[];
   seconds: { source?: number; cut?: number }; media: { source?: string; cut?: string; render?: string; poster?: string };
   progress?: { step: string; detail?: string; progress?: number; t: number; done?: boolean; failed?: string }; session?: string;
+}
+
+/** One dropped clip: a take of the talk or b-roll, as footage.py heard and saw it ("pending" while it checks). */
+export interface Clip {
+  path: string; name: string; kind: "pending" | "take" | "broll"; why?: string; chosen?: boolean;
+  duration?: number; created?: string | null; speech?: number | null; face?: number | null;
 }
 
 export const STATUS: Record<string, { label: string; tone: string }> = {

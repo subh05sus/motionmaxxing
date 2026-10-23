@@ -49,16 +49,3 @@ export function useEvents(handler: Handler): void {
     return () => { handlers.delete(h); };
   }, []);
 }
-
-/** Upload a file into the library: a new video. Calls back with 0..1 as it goes. */
-export function upload(file: File, onProgress: (p: number) => void): Promise<{ id: string }> {
-  return new Promise((resolve, reject) => {
-    const x = new XMLHttpRequest();
-    x.open("POST", "/api/videos");
-    x.setRequestHeader("x-filename", encodeURIComponent(file.name));
-    x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
-    x.onload = () => (x.status < 300 ? resolve(JSON.parse(x.responseText)) : reject(new Error(x.responseText || `HTTP ${x.status}`)));
-    x.onerror = () => reject(new Error("the upload stopped"));
-    x.send(file);
-  });
-}

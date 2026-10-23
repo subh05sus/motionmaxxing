@@ -69,6 +69,7 @@ def motion_findings(plan, style):
     went out as screenshots on a talking head: a FAIL, never a quiet fallback. Far fewer clips than the amount asks
     for (amount x the sentences, half of it at least): a WARN."""
     m = (style or {}).get("motion") or {}
+    m = m if isinstance(m, dict) else {}   # the default style names a personality ("smooth"), as plan.py pick_motion reads
     if m.get("engine", "clips") != "clips" or not (m.get("amount") or 0) > 0:
         return []
     clips = [c for c in plan["cards"] if ((c.get("anim") or {}).get("props") or {}).get("motion")]
@@ -962,6 +963,7 @@ def demo():
     assert [f["level"] for f in motion_findings(mp, {"motion": {"engine": "clips", "amount": 0.6}})] == ["FAIL"]
     assert motion_findings({**mp, "cards": [{"anim": {"props": {"motion": "01-a"}}}]}, {"motion": {"engine": "clips", "amount": 0.6}}) == []
     assert motion_findings(mp, {"motion": {"engine": "templates", "amount": 0.6}}) == [] and motion_findings(mp, {}) == []
+    assert motion_findings(mp, {"motion": "smooth"}) == []   # the default style's motion is a name: it crashed the check
     # the panel (StyleEdit.tsx panelOpen): a mixed edit opens it only for its marked cards, across a short gap, and
     # moves over 0.6 s; a split style opens it for every card but backgrounds and scenes
     mixed = {"layout": {"mode": "split"}, "cards": [{"start": 10, "end": 12, "panel": True}, {"start": 12.8, "end": 14, "panel": True},

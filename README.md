@@ -56,7 +56,9 @@ tags a release and points the Homebrew formula at it.
 
 The studio:
 
-- **New video**: the raw take, its language (or Auto), an optional script, a note for Claude, and one button.
+- **New video**: the raw takes (one, or every part and the b-roll at once: each clip is checked for you talking to
+  the camera, takes are joined in order, b-roll goes to the Library), the language (or Auto), an optional script, a
+  note for Claude, and one button.
 - **The editor**: the video in the middle, the transcript on the left with every cut word struck through (select
   words to cut them or bring them back), Claude, your notes and the facts on the right, the timeline below. Notes are
   pinned to a moment and go to Claude together. Claude's questions show up as cards.
@@ -70,7 +72,9 @@ The studio:
   blurred. Wide and vertical.
 - **Scripts**: paste a script before you record; Claude checks every number, name and step against sources found
   today and suggests fixes in your words.
-- **Styles**, **Library**, **Settings**. ⌘K finds anything, ⌘B folds the sidebar, ⌘/ shows or hides Claude.
+- **Library**: your b-roll (rename it, delete it, add more; every edit can use it), what each video takes up, and
+  Recently deleted.
+- **Styles**, **Settings**. ⌘K finds anything, ⌘B folds the sidebar, ⌘/ shows or hides Claude.
 - On a phone: watch, leave notes and approve.
 
 Everything stays on the Mac, in `~/Movies/motionmaxxing`.

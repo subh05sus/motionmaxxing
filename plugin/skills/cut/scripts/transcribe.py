@@ -403,13 +403,24 @@ def cpp_stretch(wav, code, prompt, start, end, pad=(0.2, 0.4)):
 
 
 def cpp_detect(wav):
-    """The take's language from its opening (whisper.cpp -dl), else None."""
+    """The take's language (whisper.cpp -dl) from its opening, its middle and its end, else None. Any of them Hindi
+    makes it Hindi: a Hinglish take often opens in English, and "en" would translate the Hindi after it."""
     model, _ = cpp_model()
-    # no -np here: it would also hide the "auto-detected language" line this reads
-    r = subprocess.run([whisper_cli(), "-m", str(model), "-f", str(wav), "-l", "auto", "-dl"],
-                       capture_output=True, text=True)
-    m = re.search(r"auto-detected language:\s*([a-z]{2,3})", (r.stdout or "") + (r.stderr or ""))
-    return m.group(1) if m else None
+    total = wav_seconds(wav)
+    starts = [0.0] if total <= 35 else [0.0, total - 30] if total <= 75 else [0.0, total / 2 - 15, total - 30]
+    with tempfile.TemporaryDirectory() as t:
+        parts = []
+        for i, a in enumerate(starts):
+            parts.append(Path(t) / f"{i}.wav")
+            cut_wav(wav, a, 30.0, parts[-1])
+        # no -np here: it would also hide the "auto-detected language" lines this reads
+        r = subprocess.run([whisper_cli(), "-m", str(model), "-l", "auto", "-dl"] + [x for f in parts for x in ("-f", str(f))],
+                           capture_output=True, text=True)
+    heard = re.findall(r"auto-detected language:\s*([a-z]{2,3})", (r.stdout or "") + (r.stderr or ""))
+    if not heard:
+        return None
+    hindi = [h for h in heard if L.pack(h).numbers == "hi"]
+    return hindi[0] if hindi else max(set(heard), key=heard.count)
 
 
 def run_cpp(wav, code, terms):
@@ -883,6 +894,10 @@ def main():
     code = a.lang.lower()
     if code == "auto" and a.out:      # the language the user picked in the studio, before the take was heard
         code = L.asked(Path(a.out).parent) or "auto"
+    if code == "auto" and a.script:   # a script in Hindi or Hinglish says so better than the take's opening
+        code = L.script_language(Path(a.script).read_text(encoding="utf-8")) or "auto"
+        if code != "auto":
+            print(f"language   {code} (the script)", flush=True)
     script_terms = L.keyterms(Path(a.script).read_text(encoding="utf-8"), None if code == "auto" else code) \
         if a.script else []
     terms = clean_keyterms(a.keyterm + script_terms)

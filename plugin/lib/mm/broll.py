@@ -7,6 +7,9 @@
     python3 broll.py drives                  the Google Drive folders the Drive app mounts here
     python3 broll.py demo                    self-check (needs ffmpeg)
 
+"library" is the motionmaxxing library's own b-roll folder (<library>/broll): the clips New video recognised as b-roll
+and the ones added on the Library page. It is listed first whenever it holds a clip, with no profile entry.
+
 The profile holds the libraries (profile.py set 'broll.travel="/path/to/folder"'):
 
   "broll": {"travel": "~/Library/CloudStorage/GoogleDrive-me@x.com/My Drive/B-roll/Travel",
@@ -57,8 +60,23 @@ def _raw():
         return {}
 
 
+def own_folder():
+    """The library's own b-roll (<library>/broll): what the studio's New video and Library page saved there."""
+    try:
+        from mm import library as lib
+    except ImportError:   # run as a script: lib/ is not on the path yet
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from mm import library as lib
+    return lib.path(make=False) / "broll"
+
+
 def libraries():
-    return {k: str(Path(os.path.expanduser(v))) for k, v in (_raw().get("broll") or {}).items()}
+    """The profile's libraries, and "library" (own_folder) first when it holds a clip."""
+    libs = {k: str(Path(os.path.expanduser(v))) for k, v in (_raw().get("broll") or {}).items()}
+    own = own_folder()
+    if "library" not in libs and own.is_dir() and any(f.suffix.lower() in EXTS and not f.name.startswith(".") for f in own.iterdir()):
+        libs = {"library": str(own), **libs}
+    return libs
 
 
 def slug(name):

@@ -4,10 +4,11 @@ import { Rename } from "@/components/rename";
 import { api } from "@/lib/api";
 import { toast } from "@/lib/toast";
 
-export type ItemKind = "videos" | "demos" | "scripts";
-const NOUN: Record<ItemKind, string> = { videos: "video", demos: "demo", scripts: "script" };
+export type ItemKind = "videos" | "demos" | "scripts" | "broll";
+const NOUN: Record<ItemKind, string> = { videos: "video", demos: "demo", scripts: "script", broll: "clip" };
 
-/** Rename and delete for a video, a demo or a script: the sheet, the alert, and Undo on the toast. Render `dialogs`. */
+/** Rename and delete for a video, a demo, a script or a b-roll clip: the sheet, the alert, and Undo on the toast.
+ *  Render `dialogs`. */
 export function useItemActions(kind: ItemKind, after?: () => void) {
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
   const [deleting, setDeleting] = useState<{ ids: string[]; title: string } | null>(null);
@@ -31,7 +32,7 @@ export function useItemActions(kind: ItemKind, after?: () => void) {
         onSave={async (t) => { if (renaming) { await api(`/api/${kind}/${encodeURIComponent(renaming.id)}/rename`, { json: { title: t } }); after?.(); } }} />
       <Confirm open={!!deleting} action="Delete"
         title={deleting && deleting.ids.length > 1 ? `Delete ${deleting.ids.length} ${NOUN[kind]}s?` : `Delete “${deleting?.title ?? ""}”?`}
-        body={<>It moves to Recently deleted in the Library, where you can restore it. Its Claude conversation stops.</>}
+        body={<>It moves to Recently deleted in the Library, where you can restore it.{kind === "broll" ? " Edits that already use it keep their copy." : " Its Claude conversation stops."}</>}
         onCancel={() => setDeleting(null)}
         onConfirm={() => { const d = deleting; setDeleting(null); if (d) void remove(d.ids); }} />
     </>
