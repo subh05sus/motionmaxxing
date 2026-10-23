@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowUp, ChevronRight, FileCheck2, FileText, Film, Languages, Loader2, Plus, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { DropZone } from "@/components/drop-zone";
+import { LangPicker } from "@/components/profiles";
 import { GlassSegmented } from "@/components/ui/glass-segmented";
 import type { Clip, VideoSummary } from "@/components/video-card";
 import { api, useApi, useEvents } from "@/lib/api";
@@ -100,7 +101,7 @@ export function NewVideoPage({ setTitle }: PageProps) {
         <div className="mt-6 space-y-1.5">
           <label className="flex items-center gap-1.5 headline"><Languages className="size-3.5 text-muted-foreground" />Language</label>
           {/* a phone: five equal segments in the small size, so "Hinglish" is never cut off at the edge */}
-          <div className="md:hidden"><GlassSegmented equal size="sm" label="Language" value={lang} onChange={(v) => pickLang(v as LangChoice)} options={[...LANG_OPTIONS]} /></div>
+          <div className="md:hidden"><LangPicker value={lang} onChange={(v) => pickLang(v as LangChoice)} /></div>
           <div className="hidden md:block"><GlassSegmented label="Language" value={lang} onChange={(v) => pickLang(v as LangChoice)} options={[...LANG_OPTIONS]} /></div>
           <p className="caption">{lang === "auto" ? "Claude hears it: German, English, Hindi or Hinglish."
             : lang === "hinglish" ? "Hindi and English mixed. Captions in Roman letters: “aaj hum AI tools ki baat karenge”."
