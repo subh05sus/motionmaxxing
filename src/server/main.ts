@@ -321,12 +321,19 @@ function editPrompt(id: string): string {
 
 function notesPrompt(id: string, notes: lib.Note[]): string {
   const d = lib.editDir(id);
+  const say = (n: lib.Note) => {
+    const lines = [`- note ${n.id} at ${n.t.toFixed(1)} s: ${n.text}`];
+    for (const r of n.thread ?? []) lines.push(`    ${r.from === "claude" ? "you answered" : "the user"}: ${r.text}`);
+    if (n.sent) lines.push("    (the user brought this one back: read the thread, it is not fixed yet)");
+    return lines.join("\n");
+  };
   return [
     `The user left notes on the ${notes[0]?.stage ?? "cut"} of ${d} in the studio, each at a moment of the video (seconds on the ${notes[0]?.stage === "edit" ? "edit (render.mp4, the cut's clock)" : "cut"}):`,
-    ...notes.map((n) => `- at ${n.t.toFixed(1)} s: ${n.text}`),
+    ...notes.map(say),
     "",
     notes[0]?.stage === "edit" ? "Fix each one as the edit skill says (visuals.json, images.json, style.json, then plan, stills and render again; a note about the cut itself: the cut skill)." : "Fix each one (the cut: change spans.json and keep.json by quoting, then build, render and verify as the cut skill says).",
-    "Then answer each note in one short line, in the order given, starting each with its time.",
+    `Then answer each note in its own thread, once its fix is made: python3 "${path.join(PLUGIN, "lib", "mm", "notes.py")}" reply "${d}" <note id> "<one short line: what changed>" --done`,
+    "(leave out --done when you need the user's answer first, and ask your question in that line). Answer in the user's language. The studio shows each answer under its note and turns the note green when it is done.",
   ].join("\n");
 }
 
@@ -576,26 +583,44 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         void rebuild(id, "Your transcript edit");
         return sendJson(res, 202, { ok: true, message: r.out.trim() });
       }
-      if (action === "notes" && m === "POST") {
+      if (action === "notes" && m === "POST" && !seg[4]) {
         const b = await body(req);
         const n = lib.notes(id);
         n.push({ id: `n${randomBytes(3).toString("hex")}`, t: Number(b.t) || 0, text: String(b.text ?? "").trim(), stage: lib.record(id).stage === "cut" ? "cut" : "edit", at: new Date().toISOString() });
         lib.saveNotes(id, n); broadcast("video", { id });
         return sendJson(res, 201, n);
       }
-      if (action === "notes" && m === "DELETE" && seg[4]) {
-        lib.saveNotes(id, lib.notes(id).filter((x) => x.id !== seg[4])); broadcast("video", { id });
+      if (action === "notes" && m === "DELETE" && seg[4]) {   // a note Claude never saw (one with a thread stays)
+        lib.saveNotes(id, lib.notes(id).filter((x) => x.id !== seg[4] || !!x.sent || !!x.thread?.length)); broadcast("video", { id });
         return sendJson(res, 200, lib.notes(id));
       }
+      // the user's answer in a note's thread, and reopening a fixed note: both go to Claude with the next Send notes
+      if (action === "notes" && m === "POST" && seg[4] && (seg[5] === "reply" || seg[5] === "reopen")) {
+        const b = await body(req), all = lib.notes(id), n = all.find((x) => x.id === seg[4]);
+        if (!n) return sendJson(res, 404, { error: "no such note" });
+        const text = String(b.text ?? "").trim();
+        if (seg[5] === "reply" && !text) return sendJson(res, 400, { error: "write a reply" });
+        const at = new Date().toISOString();
+        if (text) (n.thread ??= []).push({ from: "you", text, at });
+        if (seg[5] === "reopen") { delete n.resolved; n.reopened = at; }
+        lib.saveNotes(id, all); broadcast("video", { id });
+        return sendJson(res, 200, all);
+      }
       if (action === "send-notes" && m === "POST") {
-        const r = lib.record(id), all = lib.notes(id), open = all.filter((x) => !x.sent);
+        // new notes, and notes with a reply of the user's or reopened since Claude last had them
+        const r = lib.record(id), all = lib.notes(id), open = all.filter((x) => lib.noteState(x) === "new");
         if (!open.length) return sendJson(res, 400, { error: "no new notes" });
         const sid = r.session ?? `v_${id}`;
         if (!r.session) { r.session = sid; lib.saveRecord(id, r); }
         claude().ensure(sid, r.title, lib.editDir(id));
-        claude().send(sid, `Notes:\n${open.map((x) => `${x.t.toFixed(1)} s: ${x.text}`).join("\n")}`, notesPrompt(id, open));
+        const shown = open.map((x) => {
+          const fresh = (x.thread ?? []).filter((y) => y.from === "you" && !y.sent).map((y) => y.text);
+          return `${x.t.toFixed(1)} s: ${x.text}${x.sent ? ` (again${fresh.length ? `: ${fresh.join(" / ")}` : ""})` : ""}`;
+        });
+        claude().send(sid, `Notes:\n${shown.join("\n")}`, notesPrompt(id, open));
         const now = new Date().toISOString();
-        lib.saveNotes(id, all.map((x) => (x.sent ? x : { ...x, sent: now })));
+        lib.saveNotes(id, all.map((x) => (open.some((o) => o.id === x.id)
+          ? { ...x, sent: now, thread: x.thread?.map((y) => (y.from === "you" && !y.sent ? { ...y, sent: now } : y)) } : x)));
         broadcast("video", { id });
         return sendJson(res, 202, { session: sid });
       }

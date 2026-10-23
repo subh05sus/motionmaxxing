@@ -16,7 +16,14 @@ import { clock, cn } from "@/lib/utils";
 import type { PageProps } from "@/app";
 
 interface Word { i: number; text: string; start: number; end: number; kept: boolean; kind?: string }
-interface Note { id: string; t: number; text: string; stage: string; at: string; sent?: string }
+interface Reply { from: "claude" | "you"; text: string; at: string; sent?: string }
+interface Note { id: string; t: number; text: string; stage: string; at: string; sent?: string; resolved?: string; reopened?: string; thread?: Reply[] }
+/** The note's dot (the server's library.ts noteState): new = orange (not sent, reopened, or your reply not sent yet),
+ *  working = blue (Claude has it), done = green (Claude fixed it). */
+const noteState = (n: Note): "new" | "working" | "done" =>
+  !n.sent || (n.thread ?? []).some((r) => r.from === "you" && !r.sent) || (!!n.reopened && n.reopened > n.sent) ? "new" : n.resolved ? "done" : "working";
+const DOT = { new: "bg-warning", working: "bg-primary", done: "bg-success" } as const;
+const CHIP = { new: "bg-warning/20 text-warning", working: "bg-primary/15 text-primary", done: "bg-success/15 text-success" } as const;
 interface PlanSummary {
   width: number; height: number; duration: number;
   cards: { start: number; end: number; label: string; kind: string; place: "scene" | "split" | "box" | "behind" | "background" }[];
@@ -198,7 +205,8 @@ function Timeline({ spans, total, now, notes, onSeek, plan }: { spans: { start: 
           {Array.from({ length: Math.max(1, Math.floor(total / 5)) + 1 }, (_, i) => i * 5).filter((t) => t <= total).map((t) => (
             <span key={t} className="absolute top-0 h-full border-l border-foreground/15 pl-1 text-[10px] text-faint-foreground tabular" style={{ left: pct(t) }}>{t % 15 === 0 ? clock(t) : ""}</span>
           ))}
-          {notes.map((n) => <span key={n.id} title={n.text} className="absolute top-0.5 size-2.5 -translate-x-1/2 rounded-full bg-warning" style={{ left: pct(n.t) }} />)}
+          {notes.map((n) => <span key={n.id} title={`${n.text} · ${noteState(n) === "done" ? "done" : noteState(n) === "working" ? "Claude is on it" : "not sent yet"}`}
+            className={cn("absolute top-0.5 size-2.5 -translate-x-1/2 rounded-full transition-colors duration-300", DOT[noteState(n)])} style={{ left: pct(n.t) }} />)}
         </div>
         {tracks.map(([n, body]) => <div key={n} className="relative h-7 border-b border-foreground/5">{body}</div>)}
         <div className="pointer-events-none absolute top-0 bottom-0 w-px bg-primary" style={{ left: pct(head) }}>
@@ -211,22 +219,62 @@ function Timeline({ spans, total, now, notes, onSeek, plan }: { spans: { start: 
   );
 }
 
+function NoteThread({ id, n, onSeek, reload }: { id: string; n: Note; onSeek: (t: number) => void; reload: () => void }) {
+  const st = noteState(n);
+  const [text, setText] = useState("");
+  const [open, setOpen] = useState(false);
+  const post = async (kind: "reply" | "reopen") => {
+    const t = text.trim();
+    if (kind === "reply" && !t) return;
+    await api(`/api/videos/${encodeURIComponent(id)}/notes/${n.id}/${kind}`, { json: { text: t } });
+    setText(""); setOpen(false); reload();
+  };
+  const label = st === "done" ? "Done" : st === "working" ? "Claude is on it" : n.sent ? "Not sent yet: goes with Send notes" : "Not sent yet";
+  return (
+    <div className="group rounded-lg p-2 hover:bg-foreground/[0.04]">
+      <div className="flex items-start gap-2">
+        <button onClick={() => onSeek(n.t)} className={cn("mt-px rounded-[5px] px-1.5 text-[11px] font-medium tabular", CHIP[st])}>{clock(n.t)}</button>
+        <div className="min-w-0 flex-1"><p className="whitespace-pre-wrap">{n.text}</p><p className="caption">{label}</p></div>
+        {!n.sent && !n.thread?.length && <button aria-label="Delete note" onClick={async () => { await api(`/api/videos/${encodeURIComponent(id)}/notes/${n.id}`, { method: "DELETE" }); reload(); }} className="invisible text-faint-foreground hover:text-destructive group-hover:visible"><Trash2 className="size-3.5" /></button>}
+      </div>
+      {!!n.thread?.length && (
+        <div className="mt-1.5 ml-3 space-y-1 border-l border-foreground/10 pl-3">
+          {n.thread.map((r, i) => (
+            <div key={i} className="flex items-start gap-1.5">
+              <p className="min-w-0 flex-1 whitespace-pre-wrap"><span className={cn("font-medium", r.from === "claude" ? "text-primary" : "text-foreground")}>{r.from === "claude" ? "Claude" : "You"}</span>
+                <span className="text-muted-foreground"> {r.text}</span>{r.from === "you" && !r.sent && <span className="caption"> · not sent yet</span>}</p>
+              {r.from === "claude" && st === "done" && i === n.thread!.map((x) => x.from).lastIndexOf("claude") && <Check className="mt-0.5 size-3.5 shrink-0 text-success" />}
+            </div>
+          ))}
+        </div>
+      )}
+      {n.sent && (open ? (
+        <div className="mt-1.5 ml-3 flex items-center gap-1.5 rounded-[8px] bg-input px-2">
+          <input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder={st === "done" ? "What's still off?" : "Reply…"}
+            onKeyDown={(e) => { if (e.key === "Enter") void post(st === "done" ? "reopen" : "reply"); if (e.key === "Escape") setOpen(false); }}
+            className="h-7 min-w-0 flex-1 bg-transparent outline-none placeholder:text-faint-foreground" />
+          <button onClick={() => void post(st === "done" ? "reopen" : "reply")} disabled={st !== "done" && !text.trim()} className="text-primary disabled:text-faint-foreground"><Send className="size-3.5" /></button>
+        </div>
+      ) : (
+        <div className="mt-1 ml-3 flex gap-3 text-[12px]">
+          <button onClick={() => setOpen(true)} className="text-muted-foreground hover:text-foreground">Reply</button>
+          {st === "done" && <button onClick={() => setOpen(true)} className="text-muted-foreground hover:text-foreground">Reopen</button>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Notes({ id, notes, now, onSeek, reload }: { id: string; notes: Note[]; now: number; onSeek: (t: number) => void; reload: () => void }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
-  const open = notes.filter((n) => !n.sent);
+  const open = notes.filter((n) => noteState(n) === "new");
   const add = async () => { const t = text.trim(); if (!t) return; setText(""); await api(`/api/videos/${encodeURIComponent(id)}/notes`, { json: { t: now, text: t } }); reload(); };
   return (
     <div className="flex h-full flex-col">
-      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
-        {notes.length === 0 && <p className="p-3 text-center text-muted-foreground">Pause where something is off and write what to change. Each note is pinned to its moment.</p>}
-        {notes.map((n) => (
-          <div key={n.id} className="group flex items-start gap-2 rounded-lg p-2 hover:bg-foreground/5">
-            <button onClick={() => onSeek(n.t)} className="mt-px rounded-[5px] bg-warning/20 px-1.5 text-[11px] font-medium text-warning tabular">{clock(n.t)}</button>
-            <div className="min-w-0 flex-1"><p className="whitespace-pre-wrap">{n.text}</p><p className="caption">{n.sent ? "Sent to Claude" : "Not sent yet"}</p></div>
-            {!n.sent && <button onClick={async () => { await api(`/api/videos/${encodeURIComponent(id)}/notes/${n.id}`, { method: "DELETE" }); reload(); }} className="invisible text-faint-foreground hover:text-destructive group-hover:visible"><Trash2 className="size-3.5" /></button>}
-          </div>
-        ))}
+      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-2">
+        {notes.length === 0 && <p className="p-3 text-center text-muted-foreground">Pause where something is off and write what to change. Each note is pinned to its moment, and Claude answers under it.</p>}
+        {[...notes].sort((a, b) => a.t - b.t).map((n) => <NoteThread key={n.id} id={id} n={n} onSeek={onSeek} reload={reload} />)}
       </div>
       <div className="space-y-2 border-t p-2.5">
         <div className="flex items-center gap-2 rounded-[10px] bg-input px-2.5">
@@ -355,7 +403,7 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
   const sid = v.chat?.id ?? v.session ?? `v_${id}`;
   const total = onCut ? maps.total || v.seconds.cut || 0 : v.seconds.source ?? 0;
   const spans = onCut ? maps.spans : [{ start: 0, end: v.seconds.source ?? 0 }];
-  const openNotes = v.notes.filter((n) => !n.sent).length;
+  const openNotes = v.notes.filter((n) => noteState(n) === "new").length;
   const cutNow = onCut ? now : maps.toCut(now);
   const progressPill = working && (
     <div className="absolute top-6 left-1/2 -translate-x-1/2"><div className="liquid-glass liquid-glass-milky flex items-center gap-2 rounded-full px-3 py-1.5 text-[12px] whitespace-nowrap"><Loader2 className="size-3.5 animate-spin text-primary" />{doing?.step ?? "Working"}{doing?.detail ? ` · ${doing.detail}` : ""}</div></div>

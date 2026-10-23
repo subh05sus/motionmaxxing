@@ -12,7 +12,16 @@ const run = promisify(execFile);
  * studio.json, the studio's own record (title, where the raw take came from, the stage, approvals) and notes.json.
  */
 
-export interface Note { id: string; t: number; text: string; stage: "cut" | "edit"; at: string; sent?: string; resolved?: string }
+/** One answer in a note's thread: Claude's (plugin/lib/mm/notes.py reply) or the user's (sent with the next Send notes). */
+export interface Reply { from: "claude" | "you"; text: string; at: string; sent?: string }
+export interface Note { id: string; t: number; text: string; stage: "cut" | "edit"; at: string; sent?: string; resolved?: string; reopened?: string; thread?: Reply[] }
+/** The note's dot (notes.py state): new (orange: not sent, reopened, or a reply not sent yet), working (blue: Claude has
+ *  it), done (green: Claude fixed it). */
+export function noteState(n: Note): "new" | "working" | "done" {
+  if (!n.sent || (n.thread ?? []).some((r) => r.from === "you" && !r.sent)) return "new";
+  if (n.reopened && n.reopened > n.sent) return "new";
+  return n.resolved ? "done" : "working";
+}
 export interface StudioRecord {
   title: string; createdAt: string; source?: string; script?: string;
   stage: "cut" | "edit" | "done"; approved?: { cut?: string; edit?: string }; session?: string;
