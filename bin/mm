@@ -40,7 +40,10 @@ start() {
   if [ ! -f "$ROOT/web/dist/index.html" ] || [ -n "$(find "$ROOT/web/src" -newer "$ROOT/web/dist/index.html" -type f -print -quit)" ]; then
     (cd "$ROOT" && npm run build --silent >>"$LOG" 2>&1)
   fi
-  (cd "$ROOT" && nohup "$ROOT/node_modules/.bin/tsx" src/server/main.ts >>"$LOG" 2>&1 & echo $! >"$PIDF")
+  # exec: the pid file holds the server itself, not a shell that started it (stop killed that shell and left the
+  # server running)
+  (cd "$ROOT" && exec nohup "$ROOT/node_modules/.bin/tsx" src/server/main.ts >>"$LOG" 2>&1) &
+  echo $! >"$PIDF"
   for _ in $(seq 1 40); do running && return 0; sleep 0.25; done
   echo "The studio did not start. Its log: $LOG" >&2
   tail -20 "$LOG" >&2
@@ -68,7 +71,15 @@ case "${1:-open}" in
     setup_py install-all
     ;;
   stop)
-    if [ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null; then rm -f "$PIDF"; echo "stopped"; else pkill -f "src/server/main.ts" && echo "stopped" || echo "not running"; fi
+    # this studio only: its pid and whatever serves its port, never another studio on this Mac (a pkill of every
+    # main.ts took one on another port down)
+    stopped=""
+    for p in $( { cat "$PIDF" 2>/dev/null; lsof -nP -t -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null; } | sort -u || true); do
+      kill "$p" 2>/dev/null && stopped=1
+    done
+    rm -f "$PIDF"
+    for _ in $(seq 1 40); do running || break; sleep 0.25; done   # free, so a start right after starts it again
+    if [ -n "$stopped" ]; then echo "stopped"; else echo "not running"; fi
     ;;
   status)
     if running; then echo "running at $URL"; else echo "not running"; fi
