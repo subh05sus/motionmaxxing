@@ -1,6 +1,6 @@
 {
   "name": "motionmaxxing",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "description": "A script and a raw recording in, a finished short-form video out. Runs on your own Claude login.",
