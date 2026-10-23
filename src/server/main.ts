@@ -318,6 +318,7 @@ const server = http.createServer(async (req, res) => {
       if (!action && m === "GET") {
         const r = lib.record(id);
         const c = r.session ? claude.get(r.session) : undefined;
+        clipsMod.resume(id, () => broadcast("video", { id }));
         return sendJson(res, 200, { ...lib.summary(id), transcript: lib.transcript(id), plan: lib.plan(id), notes: lib.notes(id), job: jobs.get(id) ?? null, chat: c ? { id: c.id, status: c.status } : null });
       }
       // more clips dropped onto the same new video (takes, parts, b-roll), each checked like the first

@@ -46,14 +46,26 @@ const timers = new Map<string, NodeJS.Timeout>(), busy = new Set<string>(), agai
 
 export function classifySoon(id: string, done: () => void): void {
   clearTimeout(timers.get(id));
-  timers.set(id, setTimeout(() => void classify(id, done), 1500));
+  timers.set(id, setTimeout(() => { timers.delete(id); void classify(id, done); }, 1500));
+}
+
+/** Clips still "pending" with no check on its way (the studio restarted mid-check): check them now. A page that reads
+ *  the video calls this, so a clip never waits forever and Make the cut is never held back by it. */
+export function resume(id: string, done: () => void): void {
+  if (!timers.has(id) && !busy.has(id) && clips(id).some((c) => c.kind === "pending")) classifySoon(id, done);
 }
 
 async function classify(id: string, done: () => void): Promise<void> {
   if (busy.has(id)) { again.add(id); return; }
   busy.add(id);
   try {
-    const pend = clips(id).filter((c) => c.kind === "pending" && existsSync(c.path));
+    const gone = clips(id).filter((c) => c.kind === "pending" && !existsSync(c.path));
+    if (gone.length) {   // a file removed before its check: off the list, never "checking" forever
+      const r = lib.record(id);
+      r.files = r.files?.filter((c) => !gone.includes(c) && !gone.some((g) => g.path === c.path));
+      lib.saveRecord(id, r);
+    }
+    const pend = clips(id).filter((c) => c.kind === "pending");
     if (!pend.length) return;
     let rows: (Partial<lib.Clip> & { path: string })[] = [];
     try {
