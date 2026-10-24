@@ -1,4 +1,6 @@
 import { Check, ChevronDown, Copy, Loader2, Sparkles, Volume2, Wand2 } from "lucide-react";
+import { ColourSection, VolumeKeys } from "@/components/colour-tools";
+import type { Colour, Key } from "@shared/colour";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Menu, type MenuItem } from "@/components/menu";
 import { Switch } from "@/components/ui/switch";
@@ -13,7 +15,7 @@ export interface LookSettings {
   on?: boolean; strength?: number; ref?: { profile?: string; edit?: string }; face_light?: number; background?: number;
   face_light_set?: boolean; background_set?: boolean; wb?: number[]; measured?: { ref_edit?: string };
 }
-export interface Adjust { audio?: AudioSettings; look?: LookSettings; colour?: Record<string, unknown>; keyframes?: unknown[]; volume?: unknown[] }
+export interface Adjust { audio?: AudioSettings; look?: LookSettings; colour?: Partial<Colour>; keyframes?: Key[]; volume?: { t: number; db: number }[] }
 export interface AdjustInfo {
   adjust: Adjust; original: string | null; hasEdit: boolean; face: boolean; refs: { profile: string; name: string }[];
   sound: { clean?: boolean; lufs?: number; tp?: number; orig_lufs?: number; noise_removal?: string } | null;
@@ -83,11 +85,22 @@ export function Slider({ label, value, min, max, step = 0.01, onChange, format, 
   );
 }
 
-/** The Adjust tab: the video's sound and look (and, below, its colour). Changes save by themselves; the edit is made
- *  again a few seconds after the last one, and the player shows what it can at once. */
-export function AdjustPanel({ id, status, children }: { id: string; status?: { step?: string; done?: boolean; failed?: string } | null; children?: ReactNode }) {
-  const { info, adjust, save } = useAdjust(id);
+/** The Adjust tab: the video's sound, look and colour. Changes save by themselves; the edit is made again a few
+ *  seconds after the last one, and the player shows the look and colour live on the cut (look-preview.tsx). */
+export function AdjustPanel({ id, status, state, now, compare, onCompare, children }: {
+  id: string; status?: { step?: string; done?: boolean; failed?: string } | null; state: ReturnType<typeof useAdjust>; now: number;
+  compare: boolean; onCompare: (on: boolean) => void; children?: ReactNode;
+}) {
+  const { info, adjust, save } = state;
   const { current, list } = useProfiles();
+  const mine = useApi<{ settings: { looks?: { name: string; colour: Partial<Colour> }[] } }>(current ? `/api/profiles/${encodeURIComponent(current.id)}/settings` : null, [current?.id]);
+  const saveLook = async (name: string) => {
+    if (!current) return toast("Add a profile to save looks");
+    const looks = [...(mine.data?.settings.looks ?? []).filter((x) => x.name !== name), { name, colour: { ...(adjust.colour ?? {}), preset: undefined } }];
+    await api(`/api/profiles/${encodeURIComponent(current.id)}/settings`, { json: { looks } });
+    mine.reload(); save({ colour: { ...(adjust.colour ?? {}), preset: name } }, true);
+    toast(`“${name}” is in ${current.name}'s looks`);
+  };
   const a = adjust.audio ?? {}, lk = adjust.look ?? {};
   const [copyAt, setCopyAt] = useState<{ x: number; y: number } | null>(null);
   const videos = useApi<{ id: string; title: string }[]>("/api/videos");
@@ -116,6 +129,7 @@ export function AdjustPanel({ id, status, children }: { id: string; status?: { s
         <Toggle label="Room echo reduction" sub="A drier, closer voice" on={!!a.echo} disabled={!a.on} onChange={(v) => save({ audio: { echo: v } }, true)} />
         <Toggle label="Breaths and mouth clicks" sub="Softened between words" on={!!a.breaths} disabled={!a.on} onChange={(v) => save({ audio: { breaths: v } }, true)} />
         <Toggle label="Music dips under your voice" on={a.duck !== false} onChange={(v) => save({ audio: { duck: v } }, true)} />
+        <VolumeKeys keys={adjust.volume ?? []} onKeys={(k) => save({ volume: k })} now={now} />
         <div className={cn("flex min-h-10 items-center gap-3 px-3 py-1.5", !a.on && "opacity-50")}>
           <div className="min-w-0 flex-1"><p>Match a creator's sound</p>
             {a.match && <select value={a.ref?.profile ?? ""} onChange={(e) => save({ audio: { ref: { profile: e.target.value } } }, true)} className="mt-1 h-6 rounded-md bg-input px-1 text-[12px]">
@@ -126,9 +140,10 @@ export function AdjustPanel({ id, status, children }: { id: string; status?: { s
       </Section>
 
       <Section title="Look" icon={<Wand2 className="size-3.5" />}
-        footer={lk.on ? (info.face ? `Your light matched to ${refName(lk.ref)}, a soft light that follows your face, the room a touch darker.` : "Matched when the edit is made (it needs the face tracking the edit makes).")
+        footer={lk.on ? (!lk.ref?.profile ? "A soft light that follows your face and the room a touch darker. Pick a reference to match its light too."
+          : info.face ? `Your light matched to ${refName(lk.ref)}, a soft light that follows your face, the room a touch darker.` : "Matched when the edit is made (it needs the face tracking the edit makes).")
           : "Your face lit and the light matched to a reference, e.g. another profile's reels."}>
-        <Toggle label="Lit-face look" sub={lk.on ? `Reference: ${refName(lk.ref)}` : undefined} on={!!lk.on}
+        <Toggle label="Lit-face look" sub={lk.on && lk.ref?.profile ? `Reference: ${refName(lk.ref)}` : undefined} on={!!lk.on}
           onChange={(v) => save({ look: { on: v, ...(v && !lk.ref ? { ref: { profile: info.refs.find((r) => r.profile !== current?.id)?.profile ?? current?.id } } : {}) } }, true)} />
         {lk.on && (<>
           <div className="flex min-h-10 items-center gap-3 px-3 py-1.5">
@@ -143,6 +158,12 @@ export function AdjustPanel({ id, status, children }: { id: string; status?: { s
         </>)}
       </Section>
 
+      <div className="flex items-center gap-2 px-1">
+        <span className="flex-1 caption">{info.hasEdit ? "Showing the cut while you adjust, live; the edit is made again with it." : "Live on the cut."}</span>
+        <button onClick={() => onCompare(!compare)} className={cn("h-6 rounded-full px-2.5 text-[11px]", compare ? "bg-primary text-primary-foreground" : "bg-foreground/8 hover:bg-foreground/12")}>Before | after</button>
+      </div>
+      <ColourSection colour={adjust.colour} onChange={(c) => save({ colour: c })} keys={adjust.keyframes ?? []} onKeys={(k) => save({ keyframes: k })}
+        now={now} looks={mine.data?.settings.looks ?? []} onSaveLook={(n) => void saveLook(n)} />
       {children}
 
       <div className="flex items-center gap-2 px-1">

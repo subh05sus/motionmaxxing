@@ -9,8 +9,8 @@
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": false,
-    "paths": { "@/*": ["./src/*"] },
+    "paths": { "@/*": ["./src/*"], "@shared/*": ["../src/shared/*"] },
     "types": ["vite/client"]
   },
-  "include": ["src"]
+  "include": ["src", "../src/shared"]
 }

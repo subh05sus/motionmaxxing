@@ -105,6 +105,27 @@ def footage_filter(plan, sw, sh, look=False):
     return f"scale={w}:{bh},setsar=1,pad={w}:{h}:0:{y}:black"
 
 
+def sync_adjust(edit, plan_path, plan):
+    """The studio's keyframed colour and volume (adjust.json) into the plan, which the renderer draws per frame
+    (footage.tsx); the plan file is written only when they changed."""
+    try:
+        adj = json.loads((edit / "adjust.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        adj = {}
+    changed = False
+    for k in ("keyframes", "volume"):
+        v = adj.get(k) or None
+        if plan.get(k) != v:
+            if v:
+                plan[k] = v
+            else:
+                plan.pop(k, None)
+            changed = True
+    if changed:
+        plan_path.write_text(json.dumps(plan, indent=1, ensure_ascii=False), encoding="utf-8")
+    return plan
+
+
 def face_light_mask(edit, cut, m):
     """The face light's mask (adjust.py mask) for this cut, made again when the cut, its face track or the look changed."""
     import adjust
@@ -117,12 +138,13 @@ def face_light_mask(edit, cut, m):
     return out
 
 
-def grade_cutouts(src, dst, look, mask, fps):
-    """The speaker's cutout frames (NNNNNN.png, the plan's frame numbers) through the footage's look, each run of
-    consecutive frames in one ffmpeg pass with the face light's mask from the same frame on."""
+def grade_cutouts(src, dst, look, mask, fps, colour=None):
+    """The speaker's cutout frames (NNNNNN.png, the plan's frame numbers) through the footage's look and colour, each
+    run of consecutive frames in one ffmpeg pass with the face light's mask from the same frame on."""
     import adjust
     files = sorted(src.glob("*.png"))
-    sig = json.dumps(look, sort_keys=True) + f"|{mask.stat().st_mtime_ns}|{len(files)}|{max((f.stat().st_mtime_ns for f in files), default=0)}"
+    sig = (json.dumps(look, sort_keys=True) + f"|{mask.stat().st_mtime_ns if mask else 0}|{len(files)}|"
+           f"{max((f.stat().st_mtime_ns for f in files), default=0)}|{colour['cube_path'].stat().st_mtime_ns if colour else 0}")
     marker = dst / ".look"
     if marker.exists() and marker.read_text(encoding="utf-8") == sig:
         return
@@ -137,8 +159,9 @@ def grade_cutouts(src, dst, look, mask, fps):
             start = None
     print(f"giving {len(nums)} cutout frames the look", flush=True)
     for a, b in runs:
+        masks = ["-ss", f"{a / fps:.6f}", "-i", str(mask)] if look else []
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-framerate", str(fps), "-start_number", str(a), "-i", str(src / "%06d.png"),
-                        "-ss", f"{a / fps:.6f}", "-i", str(mask), "-filter_complex", adjust.graph(look, has_alpha=True),
+                        *masks, "-filter_complex", adjust.graph(look, has_alpha=True, colour=colour),
                         "-frames:v", str(b - a + 1), "-start_number", str(a), str(dst / "%06d.png")], check=True)
     marker.write_text(sig, encoding="utf-8")
 
@@ -188,13 +211,13 @@ def prepare_public(edit, plan, tag):
     import adjust
     if adjust.look_of(edit):   # on but not matched to this cut yet (a new video, or the cut changed): match it first
         subprocess.run([venv_python(), str(Path(adjust.__file__)), "auto", str(edit)], check=False)
-    look = adjust.look_of(edit)
+    look, colour = adjust.look_of(edit), adjust.colour_of(edit)
     mask = face_light_mask(edit, cut, m) if look else None
-    vf = footage_filter(plan, m["width"], m["height"], look=bool(look))
-    if look:
-        vf = adjust.graph(look, tail=vf)
-    made = pub / f"{plan['video']}.vf"   # a new layout or look remakes it
-    sig = vf + (f"|{mask.stat().st_mtime_ns}" if mask else "")
+    vf = footage_filter(plan, m["width"], m["height"], look=bool(look or colour))
+    if look or colour:
+        vf = adjust.graph(look, tail=vf, colour=colour)
+    made = pub / f"{plan['video']}.vf"   # a new layout, look or colour remakes it
+    sig = vf + (f"|{mask.stat().st_mtime_ns}" if mask else "") + (f"|{colour['cube_path'].stat().st_mtime_ns}" if colour else "")
     if not proxy.exists() or proxy.stat().st_mtime < cut.stat().st_mtime or not made.exists() or made.read_text(encoding="utf-8") != sig:
         print(f"preparing {plan['width']}x{plan['height']} copy of {cut.name}" + (" with its look" if look else ""), flush=True)
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(cut), *(["-i", str(mask)] if mask else []), "-filter_complex", vf,
@@ -206,8 +229,8 @@ def prepare_public(edit, plan, tag):
     for c in dict.fromkeys(c["src"] for c in plan.get("cutouts", [])):   # the speaker cut out for behind cards: PNGs from matte.py
         if not (edit / c).is_dir():
             sys.exit(f"ERROR: {edit / c} missing (run matte.py)")
-        if look:   # the same look as the footage, frame for frame, so the cutout always matches the speaker under it
-            grade_cutouts(edit / c, pub / c, look, mask, plan["fps"])
+        if look or colour:   # the same look as the footage, frame for frame, so the cutout always matches the speaker under it
+            grade_cutouts(edit / c, pub / c, look, mask, plan["fps"], colour)
             continue
         shutil.copytree(edit / c, pub / c, dirs_exist_ok=True, copy_function=lambda a, b: None if (
             os.path.exists(b) and os.path.getmtime(b) >= os.path.getmtime(a)) else shutil.copy2(a, b))   # only new frames
@@ -1525,7 +1548,7 @@ def main():
     a = ap.parse_args()
     edit = Path(a.edit).resolve()
     plan_path = edit / a.plan
-    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan = sync_adjust(edit, plan_path, json.loads(plan_path.read_text(encoding="utf-8")))
     tag = plan_path.stem[len("plan"):]
     if a.cmd.startswith("github-"):
         if not a.repo:

@@ -152,15 +152,29 @@ def room_chain(p):
     return f"lutrgb=r=val*{k:.3f}:g=val*{k:.3f}:b=val*{k:.3f},{mixer(s=p['room_saturation'])}"
 
 
-def graph(look, tail="", has_alpha=False):
-    """The filter graph for [0] the footage and [1] the face light's mask; `tail` runs on the result (edit.py's fit
-    to the output size). With alpha (the speaker's cutouts) the planes are RGBA, so the cut-out edge stays."""
-    p = look_params(look)
+def colour_chain(colour):
+    """The colour by hand, compiled by the studio (src/shared/colour.ts): its matrix, then its per-channel LUT."""
+    m = colour["matrix"]
+    keys = ["rr", "rg", "rb", "gr", "gg", "gb", "br", "bg", "bb"]
+    mix = ":".join(f"{k}={v:.5f}" for k, v in zip(keys, m))
+    cube = str(colour["cube_path"]).replace("'", "'\\''")
+    return f"colorchannelmixer={mix},lut1d=file='{cube}':interp=linear"
+
+
+def graph(look, tail="", has_alpha=False, colour=None):
+    """The filter graph for [0] the footage and, with a look, [1] the face light's mask; then the colour by hand;
+    `tail` runs on the result (edit.py's fit to the output size). With alpha (the speaker's cutouts) the planes are
+    RGBA, so the cut-out edge stays."""
     fmt = "gbrap" if has_alpha else "gbrp"
     end = ",format=rgba" if has_alpha else ",format=yuv420p"
+    col = f",{colour_chain(colour)}" if colour else ""
+    rest = f"{col}{end}{(',' + tail) if tail else ''}"
+    if not look:
+        return f"[0:v]format={fmt}{rest}"
+    p = look_params(look)
     return (f"[0:v]format={fmt},{global_chain(p)},split[base][lit];[base]{room_chain(p)}[room];[lit]{lit_chain(p)}[face];"
             f"[1:v]format=gray[m0];[m0][room]scale2ref=w=rw:h=rh:flags=bicubic[m][room2];[m]format={fmt}[mask];"
-            f"[room2][face][mask]maskedmerge{end}{(',' + tail) if tail else ''}")
+            f"[room2][face][mask]maskedmerge{rest}")
 
 
 def load(edit_dir):
@@ -174,6 +188,13 @@ def look_of(edit_dir):
     """The video's look when it is on, else None."""
     lk = load(edit_dir).get("look") or {}
     return lk if lk.get("on") else None
+
+
+def colour_of(edit_dir):
+    """The video's colour by hand as the studio compiled it ({"matrix", "cube_path"}), else None."""
+    c = load(edit_dir).get("colour_compiled") or {}
+    cube = Path(edit_dir) / c.get("cube", ".adjust/colour.cube")
+    return {**c, "cube_path": cube.resolve()} if c.get("matrix") and cube.exists() else None
 
 
 def save(edit_dir, d):
@@ -370,6 +391,11 @@ def demo():
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(v), "-i", str(t / "m.mkv"), "-filter_complex", graph(lk, "scale=108:192"),
                         str(o)], check=True)
         assert probe(o)["width"] == 108
+        cube = t / "c.cube"
+        cube.write_text("LUT_1D_SIZE 2\n0 0 0\n1 1 1\n")
+        col = {"matrix": [1.1, 0, 0, 0, 1, 0, 0, 0, 0.9], "cube_path": cube}
+        for g, extra in ((graph(None, "scale=108:192", colour=col), []), (graph(lk, colour=col), ["-i", str(t / "m.mkv")])):
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(v), *extra, "-filter_complex", g, str(t / "oc.mp4")], check=True)
         png = t / "c.png"
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red@0.5:s=216x384,format=rgba", "-frames:v", "1", str(png)], check=True)
         po = t / "co.png"

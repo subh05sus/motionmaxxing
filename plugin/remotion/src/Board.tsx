@@ -4,7 +4,8 @@
 // rises into the heading. Between boards the speaker has the whole frame: slow eased zooms, top-anchored, moved left
 // or right so each overlay sits on the other side. Every time comes from plan.py board_layout. Units: px of 1920x1080.
 import React from "react";
-import { AbsoluteFill, Easing, Img, OffthreadVideo, spring, staticFile, useVideoConfig } from "remotion";
+import { AbsoluteFill, Easing, Img, spring, staticFile, useVideoConfig } from "remotion";
+import { Footage } from "./footage";
 
 type W = [string, number][];
 type Tile = { src: string; label: string; at: number };
@@ -140,7 +141,7 @@ export const BoardFrame: React.FC<{ layout: BoardLayout; video: string; t: numbe
       <div style={{ position: "absolute", left: 0, top: 0, width: 1920, height: 1080, transform: `scale(${width / 1920})`, transformOrigin: "0 0", overflow: "hidden" }}>
         {/* the speaker: always mounted, so the voice plays under the canvas too */}
         <div style={{ position: "absolute", inset: 0, opacity: 1 - op }}>
-          {video ? <OffthreadVideo src={staticFile(video)} style={{ position: "absolute", ...faceRect(t, L), objectFit: "cover" }} /> : null}
+          {video ? <Footage src={video} style={{ position: "absolute", ...faceRect(t, L), objectFit: "cover" }} /> : null}
         </div>
         {op > 0.001 ? (
           <div style={{ position: "absolute", inset: 0, opacity: op }}>

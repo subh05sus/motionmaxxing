@@ -9,7 +9,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   root: here,
   plugins: [react(), tailwind()],
-  resolve: { alias: { "@": path.join(here, "src") } },
+  resolve: { alias: { "@": path.join(here, "src"), "@shared": path.join(here, "..", "src", "shared") } },
   server: { port: 5198, proxy: { "/api": "http://127.0.0.1:5199", "/media": "http://127.0.0.1:5199" } },
   build: { outDir: path.join(here, "dist"), emptyOutDir: true, chunkSizeWarningLimit: 1500 },
 });

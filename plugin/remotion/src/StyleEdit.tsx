@@ -20,6 +20,7 @@ import { Captions, CaptionStyle, Chunk } from "./Captions";
 import { Capture, Mark } from "./Capture";
 import { Look, Texture, resolveLook, useFonts } from "./look";
 import { Motion, ease, pickMotion, prog, punchAt } from "./motion";
+import { Footage, FootageAdjust, Key, Vol, useKeyFilter } from "./footage";
 import { Sfx } from "./Sfx";
 import { TextItem, Texts } from "./Texts";
 import { SceneCard, SceneView, TR_S, Transition, footageX, phases, sceneBox, sceneGrounds } from "./Scene";
@@ -96,6 +97,8 @@ export type Plan = {
   cover?: Cover;
   texts?: TextItem[]; // a card edit's title pill, running numbered list and X stamp (Texts.tsx)
   grade?: { brightness: number; saturate: number }; // the creator's grade: burned into the footage copy (edit.py footage_filter), drawn here on the cutouts
+  keyframes?: Key[]; // the studio's keyframed colour (adjust.json, footage.tsx)
+  volume?: Vol[];    // and keyframed volume of the speaker's sound
 };
 // An audio-only clip (clips.py trim): the show's cover over a blurred, dimmed copy of itself. box: % of the frame.
 // push: the cover's scale at the end; ground_push: the ground's scale at the start (it eases back to 1 as the
@@ -341,7 +344,7 @@ const LetterboxView: React.FC<Letterbox & { video: string; captions: Plan["capti
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
       {/* the render proxy already is the cut in its band on black (edit.py footage_filter) */}
-      {video ? <OffthreadVideo src={staticFile(video)} style={{ width: "100%", height: "100%" }} /> : null}
+      {video ? <Footage src={video} style={{ width: "100%", height: "100%" }} /> : null}
       {card && t < card.to ? <Img src={staticFile(card.src)} style={{ ...at(card.box), objectFit: "cover", objectPosition: "50% 40%" }} /> : null}
       {font ? <div style={{ ...at(title_box), display: "flex", flexDirection: "column", justifyContent: "flex-end", overflow: "hidden" }}>
         <div style={{ fontFamily: font, fontWeight: 400, fontSize: (title_px / 1920) * height, lineHeight: 1.1, color: "#fff",
@@ -402,7 +405,11 @@ const Backdrop: React.FC<{ card: Card; t: number; top: number }> = ({ card, t, t
   );
 };
 
-export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layout, look: lookIn, motion, cutouts, pans, cover, texts, grade }) => {
+export const StyleEdit: React.FC<Plan> = (props) => (
+  <FootageAdjust.Provider value={{ keyframes: props.keyframes, volume: props.volume }}><StyleEditInner {...props} /></FootageAdjust.Provider>
+);
+
+const StyleEditInner: React.FC<Plan> = ({ video, captions, zooms, cards, layout, look: lookIn, motion, cutouts, pans, cover, texts, grade }) => {
   const frame = useCurrentFrame();
   const { fps, width, height, durationInFrames } = useVideoConfig();
   const t = frame / fps;
@@ -410,7 +417,9 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
   const m = pickMotion(motion);
   const fonts = useFonts(look);
   const split = layout?.mode === "split";
-  const graded: React.CSSProperties = grade ? { filter: `brightness(${grade.brightness}) saturate(${grade.saturate})` } : {};
+  const kf = useKeyFilter();
+  const gradeF = grade ? `brightness(${grade.brightness}) saturate(${grade.saturate})` : "";
+  const graded: React.CSSProperties = gradeF || kf ? { filter: [gradeF, kf].filter(Boolean).join(" ") } : {};
   if (layout?.mode === "letterbox") return <LetterboxView {...layout} video={video} captions={captions} t={t} m={m} font={fonts.ready ? fonts.body : null} />;
   if (layout?.mode === "board") {
     // the canvas and the speaker are drawn by Board.tsx; the cards left in the plan are its overlays on the speaker
@@ -458,7 +467,7 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
     return (
       <AbsoluteFill style={{ backgroundColor: "#000" }}>
         <AbsoluteFill style={cam}>
-          {video ? <OffthreadVideo src={staticFile(video)} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
+          {video ? <Footage src={video} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
         </AbsoluteFill>
         {cover ? <CoverView c={cover} t={t} dur={durationInFrames / fps} m={m} width={width} height={height} /> : null}
         {backdrops}
@@ -504,7 +513,7 @@ export const StyleEdit: React.FC<Plan> = ({ video, captions, zooms, cards, layou
         borderRadius: `${r}px ${r}px 0 0`, boxShadow: o > 0 ? `0 ${-height * 0.004}px ${height * 0.02}px rgba(0,0,0,${0.12 * o})` : undefined }}>
         <div style={{ position: "absolute", left: -(x / 100) * width * o, top: -(y / 100) * height * o, width: width * k,
           height: height * k, transform: `translateX(${footageX(t, cards, width, m)}px) scale(${zs.k})`, transformOrigin: zOrigin }}>
-          {video ? <OffthreadVideo src={staticFile(video)} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
+          {video ? <Footage src={video} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
         </div>
       </div>
       {layout.variant === "cutout" ? (() => {

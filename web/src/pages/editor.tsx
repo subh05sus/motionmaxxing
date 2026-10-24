@@ -1,7 +1,9 @@
 import { AnimatePresence, motion } from "motion/react";
 import { Check, Ellipsis, FolderOpen, Info, Loader2, MessageSquare, Pause, Pencil, Play, Scissors, Send, Share, SlidersHorizontal, StickyNote, Trash2, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AdjustPanel } from "@/components/adjust";
+import { AdjustPanel, useAdjust } from "@/components/adjust";
+import { LookPreview } from "@/components/look-preview";
+import { volumeAt } from "@shared/colour";
 import { ChatPanel, StatusDot } from "@/components/chat";
 import { GlassSegmented } from "@/components/ui/glass-segmented";
 import { STATUS, type VideoSummary } from "@/components/video-card";
@@ -95,8 +97,8 @@ function useOriginalVoice(playerRef: React.RefObject<HTMLVideoElement | null>, a
   }, [playerRef, audio, on, src]);
 }
 
-function Player({ src, playerRef, onTime, poster, sound, overlay }: { src?: string; playerRef: React.RefObject<HTMLVideoElement | null>; onTime: (t: number) => void; poster?: string;
-  sound?: { original: string; lufs?: number; orig_lufs?: number } | null; overlay?: ReactNode }) {
+function Player({ src, playerRef, onTime, poster, sound, overlay, onVideo }: { src?: string; playerRef: React.RefObject<HTMLVideoElement | null>; onTime: (t: number) => void; poster?: string;
+  sound?: { original: string; lufs?: number; orig_lufs?: number } | null; overlay?: ReactNode; onVideo?: (v: HTMLVideoElement | null) => void }) {
   const [orig, setOrig] = useState(false);
   const audio = useRef<HTMLAudioElement>(null);
   useOriginalVoice(playerRef, audio, orig && !!sound, src);
@@ -122,7 +124,7 @@ function Player({ src, playerRef, onTime, poster, sound, overlay }: { src?: stri
   if (!src) return <div className="grid size-full place-items-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>;
   return (
     <div className="relative flex size-full items-center justify-center overflow-hidden" onMouseMove={poke} onMouseLeave={() => playing && setHover(false)}>
-      <video ref={playerRef} src={src} poster={poster} playsInline preload="auto" crossOrigin="anonymous" onClick={() => { const v = playerRef.current; if (v) void (v.paused ? v.play() : v.pause()); }}
+      <video ref={(el) => { (playerRef as React.MutableRefObject<HTMLVideoElement | null>).current = el; onVideo?.(el); }} src={src} poster={poster} playsInline preload="auto" crossOrigin="anonymous" onClick={() => { const v = playerRef.current; if (v) void (v.paused ? v.play() : v.pause()); }}
         className="max-h-full max-w-full rounded-[10px] bg-black object-contain shadow-[0_20px_60px_-20px_rgba(0,0,0,0.7)]" />
       {overlay}
       {sound && <audio ref={audio} src={sound.original} preload="auto" />}
@@ -371,6 +373,12 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
   const [view, setView] = useState<"edit" | "cut" | "raw">("edit");
   const [tab, setTab] = useState<"claude" | "notes" | "adjust" | "info">("claude");
   const [now, setNow] = useState(0);
+  // the Adjust tab: the video's sound, look and colour, live on the cut (look-preview.tsx), a before | after line
+  const adj = useAdjust(id);
+  const [compare, setCompare] = useState(false);
+  const [split, setSplit] = useState(0.5);
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
+  const viewBefore = useRef<"edit" | "cut" | "raw" | null>(null);
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
   const maps = useMemo(() => timeMaps(v?.transcript.kept ?? []), [v?.transcript.kept]);
@@ -395,6 +403,20 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
   // between Claude's steps, the newest progress line of a stage still under way keeps the pill up
   const working = !!v?.job || !!v?.working || v?.progress && !v.progress.done && !v.progress.failed && Date.now() / 1000 - v.progress.t < 900 && (v.status === "transcribing" || v.status === "cutting" || v.status === "making");
   const doing = v?.working ?? v?.progress;
+  useEffect(() => {   // the Adjust tab shows the cut, where the look and colour are live; leaving it brings the view back
+    if (tab === "adjust" && hasCut && view !== "cut") { viewBefore.current = view; setView("cut"); }
+    if (tab !== "adjust" && viewBefore.current) { setView(viewBefore.current); viewBefore.current = null; }
+  }, [tab, hasCut]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const live = tab === "adjust" && showing === "cut";
+  useEffect(() => {   // volume keyframes heard live on the cut too
+    const keys = adj.adjust.volume;
+    if (!videoEl || !live || !keys?.length) { if (videoEl) videoEl.volume = 1; return; }
+    const on = () => { videoEl.volume = volumeAt(keys, videoEl.currentTime); };
+    on(); videoEl.addEventListener("timeupdate", on);
+    return () => { videoEl.removeEventListener("timeupdate", on); videoEl.volume = 1; };
+  }, [videoEl, live, adj.adjust.volume]);
+  const preview = live ? <LookPreview video={videoEl} faceUrl={`/media/${encodeURIComponent(id)}/face.json`} look={adj.adjust.look?.on ? (adj.adjust.look as never) : null}
+    colour={adj.adjust.colour ?? null} keys={adj.adjust.keyframes} split={compare ? split : null} onSplit={(x) => x !== null && setSplit(x)} /> : null;
   const wide = useMediaQuery("(min-width: 1024px)");
   const [phoneTab, setPhoneTab] = useState<"notes" | "claude">("notes");
   const [more, setMore] = useState<{ x: number; y: number } | null>(null);
@@ -477,7 +499,7 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
           <div className="min-h-0 flex-1"><Transcript words={v.transcript.words} now={nowSrc} busy={saving || !!v.job} onSeek={(w) => seekSrc(w.start)} onEdit={edit} /></div>
         </aside>
         <section className="relative min-w-0 flex-1 p-4">
-          <Player src={src} poster={v.media.poster} playerRef={player} onTime={onTime} sound={showing === "raw" ? null : v.sound} />
+          <Player src={src} poster={v.media.poster} playerRef={player} onTime={onTime} sound={showing === "raw" ? null : v.sound} overlay={preview} onVideo={setVideoEl} />
           {progressPill}
         </section>
         <AnimatePresence initial={false}>
@@ -494,7 +516,7 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
                 <div className="min-h-0 flex-1">
                   {tab === "claude" && <ChatPanelBody sid={sid} id={id} title={v.title} status={v.status} at={() => cutNow} />}
                   {tab === "notes" && <Notes id={id} notes={v.notes} now={cutNow} onSeek={seekCut} reload={reload} />}
-                  {tab === "adjust" && <AdjustPanel id={id} status={v.progress} />}
+                  {tab === "adjust" && <AdjustPanel id={id} status={v.progress} state={adj} now={cutNow} compare={compare} onCompare={setCompare} />}
                   {tab === "info" && <Inspector v={v} />}
                 </div>
               </div>

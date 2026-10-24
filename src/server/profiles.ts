@@ -12,7 +12,7 @@ const run = promisify(execFile);
  * profile.json: language, brand kit, names and terms, social handles, export folder, the usual call to action.
  */
 
-export const OWN = ["lang", "brand", "names", "handles", "export_dir", "cta", "defaults"] as const;
+export const OWN = ["lang", "brand", "names", "handles", "export_dir", "cta", "defaults", "looks"] as const;
 
 /** What a new video starts with (its adjust.json), unless the profile's own "defaults" say otherwise: studio sound with
  *  the music dipping under the voice; no look (a profile turns it on with a reference, e.g. another profile's reels). */

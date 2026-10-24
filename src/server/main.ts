@@ -13,6 +13,7 @@ import * as bin from "./trash.js";
 import { CUT, EDITS, HOME, LIBRARY, PLUGIN, PORT, RECORDINGS, ROOT, SESSIONS, SETUP, VIDEOS, WEB_DIST, ensureDirs, pickProfile, profile,
   profileEnv, profileId, profiles, python, slug, withProfile } from "./paths.js";
 import * as prof from "./profiles.js";
+import { compile, cube1d, isNeutral } from "../shared/colour.js";
 
 /**
  * The studio's server: the page (web/dist), its API, live events, the library's media, and Claude behind it. Local only:
@@ -730,6 +731,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         }
         // a new reference, or the look switched on: match it again (adjust.py auto) on the next render
         if (changed.has("look") && (b.look?.ref || b.look?.on) && !b.look?.wb) { delete next.look.cut; }
+        if (changed.has("colour")) {
+          // the colour by hand as the render applies it: a matrix and a 1D LUT (the preview computes the same)
+          const cube = path.join(lib.editDir(id), ".adjust", "colour.cube");
+          if (isNeutral(next.colour)) { delete next.colour_compiled; rmSync(cube, { force: true }); }
+          else {
+            const c = compile(next.colour, 1024);
+            mkdirSync(path.dirname(cube), { recursive: true });
+            writeFileSync(cube, cube1d(c.lut));
+            next.colour_compiled = { matrix: c.matrix.map((x) => Math.round(x * 1e5) / 1e5), cube: ".adjust/colour.cube" };
+          }
+        }
         writeAdjust(id, next);
         if (changed.has("audio")) void cleanSound(id);
         else if (["look", "colour", "keyframes", "volume"].some((k) => changed.has(k))) renderSoon(id, "Your changes");
