@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
-import { Check, Ellipsis, FolderOpen, Info, Loader2, MessageSquare, Pause, Pencil, Play, Scissors, Send, Share, StickyNote, Trash2, Undo2 } from "lucide-react";
+import { Check, Ellipsis, FolderOpen, Info, Loader2, MessageSquare, Pause, Pencil, Play, Scissors, Send, Share, SlidersHorizontal, StickyNote, Trash2, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AdjustPanel } from "@/components/adjust";
 import { ChatPanel, StatusDot } from "@/components/chat";
 import { GlassSegmented } from "@/components/ui/glass-segmented";
 import { STATUS, type VideoSummary } from "@/components/video-card";
@@ -36,6 +37,7 @@ interface Detail extends VideoSummary {
   transcript: { words: Word[]; cuts: { start: number; end: number; kind: string; note?: string }[]; kept: { start: number; end: number }[]; lang?: string };
   plan: PlanSummary | null;
   notes: Note[]; job: { name: string } | null; chat: { id: string; status: string } | null;
+  sound?: { original: string; lufs?: number; orig_lufs?: number } | null;
 }
 
 /** Where a visual sits, as a colour on the timeline. */
@@ -75,7 +77,34 @@ function timeMaps(kept: { start: number; end: number }[]) {
   };
 }
 
-function Player({ src, playerRef, onTime, poster }: { src?: string; playerRef: React.RefObject<HTMLVideoElement | null>; onTime: (t: number) => void; poster?: string }) {
+/** The studio sound's A/B: the original voice from a muted video's twin <audio>, kept in step with the picture. */
+function useOriginalVoice(playerRef: React.RefObject<HTMLVideoElement | null>, audio: React.RefObject<HTMLAudioElement | null>, on: boolean, src?: string) {
+  useEffect(() => {
+    const v = playerRef.current, a = audio.current;
+    if (!v || !a) return;
+    v.muted = on;
+    if (!on) { a.pause(); return; }
+    const sync = () => { if (Math.abs(a.currentTime - v.currentTime) > 0.08) a.currentTime = v.currentTime; };
+    const play = () => { a.currentTime = v.currentTime; a.playbackRate = v.playbackRate; void a.play().catch(() => undefined); };
+    const pause = () => a.pause();
+    sync();
+    if (!v.paused) play();
+    const timer = window.setInterval(sync, 400);
+    v.addEventListener("play", play); v.addEventListener("pause", pause); v.addEventListener("seeked", sync);
+    return () => { window.clearInterval(timer); v.removeEventListener("play", play); v.removeEventListener("pause", pause); v.removeEventListener("seeked", sync); a.pause(); v.muted = false; };
+  }, [playerRef, audio, on, src]);
+}
+
+function Player({ src, playerRef, onTime, poster, sound, overlay }: { src?: string; playerRef: React.RefObject<HTMLVideoElement | null>; onTime: (t: number) => void; poster?: string;
+  sound?: { original: string; lufs?: number; orig_lufs?: number } | null; overlay?: ReactNode }) {
+  const [orig, setOrig] = useState(false);
+  const audio = useRef<HTMLAudioElement>(null);
+  useOriginalVoice(playerRef, audio, orig && !!sound, src);
+  useEffect(() => {   // A: hear the original voice, A again: the studio sound
+    const k = (e: KeyboardEvent) => { if (e.key.toLowerCase() === "a" && !e.metaKey && !e.ctrlKey && !(e.target as HTMLElement)?.closest?.("input,textarea,[contenteditable]") && sound) setOrig((x) => !x); };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [sound]);
   const [playing, setPlaying] = useState(false);
   const [t, setT] = useState(0);
   const [dur, setDur] = useState(0);
@@ -93,8 +122,17 @@ function Player({ src, playerRef, onTime, poster }: { src?: string; playerRef: R
   if (!src) return <div className="grid size-full place-items-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>;
   return (
     <div className="relative flex size-full items-center justify-center overflow-hidden" onMouseMove={poke} onMouseLeave={() => playing && setHover(false)}>
-      <video ref={playerRef} src={src} poster={poster} playsInline preload="auto" onClick={() => { const v = playerRef.current; if (v) void (v.paused ? v.play() : v.pause()); }}
+      <video ref={playerRef} src={src} poster={poster} playsInline preload="auto" crossOrigin="anonymous" onClick={() => { const v = playerRef.current; if (v) void (v.paused ? v.play() : v.pause()); }}
         className="max-h-full max-w-full rounded-[10px] bg-black object-contain shadow-[0_20px_60px_-20px_rgba(0,0,0,0.7)]" />
+      {overlay}
+      {sound && <audio ref={audio} src={sound.original} preload="auto" />}
+      {sound && (
+        <button onClick={() => setOrig(!orig)} title="Hear the original voice at the same moment (A)"
+          className="liquid-glass liquid-glass-clear absolute top-3 right-3 flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-medium text-white active:scale-95">
+          <span className={cn("size-1.5 rounded-full", orig ? "bg-white/60" : "bg-[#30D158]")} />
+          {orig ? `Original${sound.orig_lufs != null ? ` · ${sound.orig_lufs.toFixed(1)} LUFS` : ""}` : `Studio sound${sound.lufs != null ? ` · ${sound.lufs.toFixed(1)} LUFS` : ""}`}
+        </button>
+      )}
       {/* Player controls float over the video: glass, monochrome, gone while it plays untouched. */}
       <AnimatePresence>
         {(hover || !playing) && (
@@ -331,7 +369,7 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
   useEvents((t, d) => { if (t === "video" && d?.id === id) reload(); });
   const player = useRef<HTMLVideoElement>(null);
   const [view, setView] = useState<"edit" | "cut" | "raw">("edit");
-  const [tab, setTab] = useState<"claude" | "notes" | "info">("claude");
+  const [tab, setTab] = useState<"claude" | "notes" | "adjust" | "info">("claude");
   const [now, setNow] = useState(0);
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
@@ -439,7 +477,7 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
           <div className="min-h-0 flex-1"><Transcript words={v.transcript.words} now={nowSrc} busy={saving || !!v.job} onSeek={(w) => seekSrc(w.start)} onEdit={edit} /></div>
         </aside>
         <section className="relative min-w-0 flex-1 p-4">
-          <Player src={src} poster={v.media.poster} playerRef={player} onTime={onTime} />
+          <Player src={src} poster={v.media.poster} playerRef={player} onTime={onTime} sound={showing === "raw" ? null : v.sound} />
           {progressPill}
         </section>
         <AnimatePresence initial={false}>
@@ -447,8 +485,8 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
             <motion.aside initial={{ width: 0, opacity: 0 }} animate={{ width: 340, opacity: 1 }} exit={{ width: 0, opacity: 0, transition: { duration: 0.16 } }} transition={SPRING_DEFAULT} className="shrink-0 overflow-hidden border-l bg-sidebar">
               <div className="flex h-full w-[340px] flex-col">
                 <div className="flex h-9 shrink-0 items-center gap-1 border-b px-2">
-                  {([["claude", "Claude", MessageSquare], ["notes", `Notes${openNotes ? ` (${openNotes})` : ""}`, StickyNote], ["info", "Inspector", Info]] as const).map(([k, label, Icon]) => (
-                    <button key={k} onClick={() => setTab(k)} className={cn("flex h-6 items-center gap-1 rounded-md px-2 text-[12px]", tab === k ? "bg-foreground/10 text-foreground" : "text-muted-foreground hover:text-foreground")}><Icon className="size-3.5" />{label}</button>
+                  {([["claude", "Claude", MessageSquare], ["notes", `Notes${openNotes ? ` (${openNotes})` : ""}`, StickyNote], ["adjust", "Adjust", SlidersHorizontal], ["info", "Inspector", Info]] as const).map(([k, label, Icon]) => (
+                    <button key={k} onClick={() => setTab(k)} className={cn("flex h-6 items-center gap-1 whitespace-nowrap rounded-md px-1.5 text-[12px]", tab === k ? "bg-foreground/10 text-foreground" : "text-muted-foreground hover:text-foreground")}><Icon className="size-3.5" />{label}</button>
                   ))}
                   <div className="flex-1" />
                   {tab === "claude" && <StatusDot status={v.chat?.status as never} />}
@@ -456,6 +494,7 @@ export function EditorPage({ id, setTitle, chatOpen }: PageProps & { id: string;
                 <div className="min-h-0 flex-1">
                   {tab === "claude" && <ChatPanelBody sid={sid} id={id} title={v.title} status={v.status} at={() => cutNow} />}
                   {tab === "notes" && <Notes id={id} notes={v.notes} now={cutNow} onSeek={seekCut} reload={reload} />}
+                  {tab === "adjust" && <AdjustPanel id={id} status={v.progress} />}
                   {tab === "info" && <Inspector v={v} />}
                 </div>
               </div>

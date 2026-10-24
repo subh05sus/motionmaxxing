@@ -52,7 +52,7 @@ def sync_renderer(edit=None):
     if not (REMOTION / "node_modules" / "remotion").exists() or not same_deps:
         sys.path.insert(0, str(PLUGIN / "lib"))
         from mm import models
-        said = models.announce("the renderer" + (" update" if (REMOTION / "node_modules").exists() else ""), edit, bar=False)
+        said = models.announce("the renderer" + (" update" if (REMOTION / "node_modules").exists() else ""), edit)
         subprocess.run([sys.executable, str(SETUP), "remotion"], check=True)
         said.done()
     mirror(SRC / "src", REMOTION / "src")
@@ -186,6 +186,8 @@ def prepare_public(edit, plan, tag):
     m = probe(cut)
     # the video's own look (adjust.py: the light on the face, the colour), burned into the copy and the cutouts alike
     import adjust
+    if adjust.look_of(edit):   # on but not matched to this cut yet (a new video, or the cut changed): match it first
+        subprocess.run([venv_python(), str(Path(adjust.__file__)), "auto", str(edit)], check=False)
     look = adjust.look_of(edit)
     mask = face_light_mask(edit, cut, m) if look else None
     vf = footage_filter(plan, m["width"], m["height"], look=bool(look))

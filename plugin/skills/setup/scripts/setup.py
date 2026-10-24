@@ -144,6 +144,8 @@ def rows():
                 None if rv and chrome_for(REMOTION_HOME / "node_modules" / ".remotion") else f"python3 {Path(__file__).name} remotion"))
     ok_m, why_m = motion_row()
     out.append(("motion clip tools", ok_m, why_m, None if ok_m else f"python3 {Path(__file__).name} motion"))
+    ok_n, why_n = noise_row()
+    out.append(("noise removal", ok_n or why_n.startswith("not available"), why_n, None if ok_n else f"python3 {Path(__file__).name} noise"))
     return out
 
 
@@ -224,6 +226,44 @@ def quiet(cmd, cwd, what, timeout=1800):
     if r.returncode:
         sys.exit(f"ERROR: {what} failed: {(r.stderr or r.stdout).strip()[-500:]}")
     return r
+
+
+# the studio sound's AI noise removal (edit/scripts/audio.py): DeepFilterNet's own command-line build (MIT or Apache-2.0),
+# one file per platform from its release, the model inside it. Without it audio.py falls back to FFmpeg's afftdn.
+DF_VERSION = "0.5.6"
+DF_ASSETS = {("darwin", "arm64"): "aarch64-apple-darwin", ("darwin", "x86_64"): "x86_64-apple-darwin",
+             ("linux", "x86_64"): "x86_64-unknown-linux-musl", ("linux", "aarch64"): "aarch64-unknown-linux-gnu",
+             ("win32", "amd64"): "x86_64-pc-windows-msvc.exe"}
+
+
+def deep_filter_bin():
+    return HOME / "bin" / ("deep-filter.exe" if sys.platform == "win32" else "deep-filter")
+
+
+def noise_row():
+    b = deep_filter_bin()
+    if b.exists():
+        return True, f"DeepFilterNet {DF_VERSION}"
+    import platform
+    return False, "not downloaded (10 MB)" if (sys.platform, platform.machine().lower()) in DF_ASSETS else "not available here: FFmpeg's noise removal is used"
+
+
+def step_noise():
+    import platform
+    import urllib.request
+    asset = DF_ASSETS.get((sys.platform, platform.machine().lower()))
+    if not asset:
+        print("skip noise removal: no DeepFilterNet build for this machine", flush=True)
+        return
+    url = f"https://github.com/Rikorose/DeepFilterNet/releases/download/v{DF_VERSION}/deep-filter-{DF_VERSION}-{asset}"
+    b = deep_filter_bin()
+    b.parent.mkdir(parents=True, exist_ok=True)
+    tmp = b.with_suffix(".part")
+    print(f"downloading {url}", flush=True)
+    urllib.request.urlretrieve(url, tmp)
+    tmp.chmod(0o755)
+    tmp.replace(b)
+    print("ok   noise removal", flush=True)
 
 
 def step_edit_models():
@@ -325,6 +365,8 @@ def install_all():
             plan.append(("Installing the renderer", step_remotion))
         elif name == "motion clip tools":
             plan.append(("Installing the motion clip tools", step_motion))
+        elif name == "noise removal":
+            plan.append(("Downloading the noise removal", step_noise))
         elif fix:
             print(f"FIX  {name}: {fix}")
     for i, (label, fn) in enumerate(plan):
@@ -348,9 +390,9 @@ def demo():
         VPY = VENV / "bin" / "python"
         assert venv_ok() == (False, "not made yet")
         names = [r[0] for r in rows()]
-        assert names[-9:] == ["ffmpeg", "node", "whisper.cpp", "python 3.10-3.13", "engine venv", "transcription model",
-                              "face and cutout models", "renderer", "motion clip tools"], names
-        assert names[:-9] in ([], ["Claude"]), names       # the sign-in first, where there is a Claude Code to ask
+        assert names[-10:] == ["ffmpeg", "node", "whisper.cpp", "python 3.10-3.13", "engine venv", "transcription model",
+                              "face and cutout models", "renderer", "motion clip tools", "noise removal"], names
+        assert names[:-10] in ([], ["Claude"]), names       # the sign-in first, where there is a Claude Code to ask
         HOME, VENV, VPY = old
     for p in python_candidates():
         v = version_of([p, "--version"], r"Python (\d+)\.(\d+)")
@@ -376,6 +418,8 @@ def main():
         return step_remotion()
     if a == ["motion"]:
         return step_motion()
+    if a == ["noise"]:
+        return step_noise()
     print(__doc__)
     return 2
 

@@ -12,7 +12,18 @@ const run = promisify(execFile);
  * profile.json: language, brand kit, names and terms, social handles, export folder, the usual call to action.
  */
 
-export const OWN = ["lang", "brand", "names", "handles", "export_dir", "cta"] as const;
+export const OWN = ["lang", "brand", "names", "handles", "export_dir", "cta", "defaults"] as const;
+
+/** What a new video starts with (its adjust.json), unless the profile's own "defaults" say otherwise: studio sound with
+ *  the music dipping under the voice; no look (a profile turns it on with a reference, e.g. another profile's reels). */
+export const NEW_VIDEO = {
+  audio: { on: true, duck: true, echo: false, breaths: false, match: false },
+  look: { on: false, strength: 1 },
+};
+export function newVideoAdjust(p: Profile | undefined): Record<string, unknown> {
+  const d = (p ? (settings(p).defaults as Record<string, Record<string, unknown>> | undefined) : undefined) ?? {};
+  return { audio: { ...NEW_VIDEO.audio, ...(d.audio ?? {}) }, look: { ...NEW_VIDEO.look, ...(d.look ?? {}) } };
+}
 export type Settings = Partial<Record<(typeof OWN)[number], unknown>>;
 
 export const byId = (id: string): Profile | undefined => profiles().find((p) => p.id === id);

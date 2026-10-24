@@ -161,6 +161,61 @@ function deliverTo(id: string): string | null {
   return dest;
 }
 
+// --- a video's own sound and look (adjust.json: edit/scripts/audio.py, adjust.py) ------------------------------------
+
+const EDIT_SCRIPTS = path.join(PLUGIN, "skills", "edit", "scripts");
+const readAdjust = (id: string): Record<string, any> => { try { return JSON.parse(readFileSync(path.join(lib.editDir(id), "adjust.json"), "utf8")); } catch { return {}; } };
+const writeAdjust = (id: string, d: Record<string, unknown>): void => writeFileSync(path.join(lib.editDir(id), "adjust.json"), JSON.stringify(d, null, 1));
+
+/** The cut's voice cleaned (or put back) per its audio settings, then the edit made again so it carries it. */
+async function cleanSound(id: string): Promise<void> {
+  if (jobs.has(jk(id))) { setTimeout(() => void cleanSound(id), 5000).unref(); return; }
+  jobs.set(jk(id), { name: "sound", startedAt: new Date().toISOString() });
+  try {
+    step(id, "Cleaning up the sound");
+    const r = await runScript([path.join(EDIT_SCRIPTS, "audio.py"), "apply", lib.editDir(id)]);
+    if (r.code) throw new Error(r.err.trim().split("\n").slice(-1)[0] || "the sound could not be cleaned");
+    // the music bed dips under the voice as it is now, or not at all (the switch): made again the way it was made
+    if (existsSync(path.join(lib.editDir(id), ".sfx", "music.wav"))) {
+      step(id, "Mixing the music under your voice");
+      await runScript([path.join(EDIT_SCRIPTS, "sfx.py"), "music", lib.editDir(id), "--again"]);
+    }
+    step(id, r.out.trim().split("\n").slice(-1)[0] || "The sound is clean", { done: true, progress: 1 });
+  } catch (e) {
+    step(id, "The sound could not be cleaned", { failed: (e as Error).message });
+  } finally {
+    jobs.delete(jk(id));
+    broadcast("video", { id });
+  }
+  renderSoon(id, "The new sound");
+}
+
+// the edit made again a few seconds after the last change (the owner's choice: a live preview, then a render by itself)
+const pendingRenders = new Map<string, NodeJS.Timeout>();
+function renderSoon(id: string, why: string, ms = 4000): void {
+  const k = jk(id), pid = profileId();
+  clearTimeout(pendingRenders.get(k));
+  pendingRenders.set(k, setTimeout(() => { pendingRenders.delete(k); withProfile(pid, () => void renderEdit(id, why)); }, ms));
+}
+async function renderEdit(id: string, why: string): Promise<void> {
+  const d = lib.editDir(id);
+  if (!existsSync(path.join(d, "plan.json"))) return;   // no edit yet: the cut shows the changes live
+  const r = lib.record(id), c = r.session ? claude().get(r.session) : undefined;
+  if (jobs.has(jk(id)) || lib.working(id) || c?.status === "running") { renderSoon(id, why, 15000); return; }   // after what runs now
+  jobs.set(jk(id), { name: "render", startedAt: new Date().toISOString() });
+  try {
+    step(id, `${why}: making the video`);
+    const out = await runScript([path.join(EDIT_SCRIPTS, "edit.py"), "render", d]);
+    if (out.code) throw new Error(out.err.trim().split("\n").slice(-1)[0] || "the render stopped");
+    step(id, "The video is ready", { done: true, progress: 1 });
+  } catch (e) {
+    step(id, "The video could not be made", { failed: (e as Error).message });
+  } finally {
+    jobs.delete(jk(id));
+    broadcast("video", { id });
+  }
+}
+
 // --- profiles -----------------------------------------------------------------------------------------------------
 
 /** This device picks a profile: its cookie (every later request, video and picture runs as it) and the studio's last
@@ -498,6 +553,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         source = b.path; title = b.title || path.basename(b.path).replace(/\.[^.]+$/, "");
       }
       const id = lib.newEdit(title, source);
+      // the profile's defaults for a new video: studio sound, the look (adjust.json; audio.py and adjust.py read it)
+      writeFileSync(path.join(lib.editDir(id), "adjust.json"), JSON.stringify(prof.newVideoAdjust(profile()), null, 1));
       clipsMod.addClip(id, source, name ?? path.basename(source));
       clipsMod.classifySoon(id, () => broadcast("video", { id }));
       broadcast("video", { id });
@@ -511,7 +568,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         const r = lib.record(id);
         const c = r.session ? claude().get(r.session) : undefined;
         clipsMod.resume(id, () => broadcast("video", { id }));
-        return sendJson(res, 200, { ...lib.summary(id), transcript: lib.transcript(id), plan: lib.plan(id), notes: lib.notes(id), job: jobs.get(jk(id)) ?? null, chat: c ? { id: c.id, status: c.status } : null });
+        // the studio sound's A/B: the original voice beside the cleaned one, and both levels (audio.py)
+        const snd = (() => { try { return JSON.parse(readFileSync(path.join(lib.editDir(id), ".adjust", "audio.json"), "utf8")); } catch { return null; } })();
+        const sound = snd?.clean && existsSync(path.join(lib.editDir(id), "cut.orig.m4a"))
+          ? { original: `/media/${encodeURIComponent(id)}/cut.orig.m4a?v=${snd.cut_mtime_ns ?? 0}`, lufs: snd.lufs, orig_lufs: snd.orig_lufs } : null;
+        return sendJson(res, 200, { ...lib.summary(id), transcript: lib.transcript(id), plan: lib.plan(id), notes: lib.notes(id), job: jobs.get(jk(id)) ?? null, chat: c ? { id: c.id, status: c.status } : null, sound });
       }
       // more clips dropped onto the same new video (takes, parts, b-roll), each checked like the first
       if (action === "files" && m === "POST" && !seg[4]) {
@@ -651,6 +712,50 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         if (!existsSync(path.join(lib.editDir(id), "plan.json"))) return sendJson(res, 400, { error: "make the edit first" });
         exportVideo(id, !!profile());
         return sendJson(res, 202, { ok: true });
+      }
+      if (action === "adjust" && m === "GET" && !seg[4]) {
+        const d = lib.editDir(id);
+        const done = (() => { try { return JSON.parse(readFileSync(path.join(d, ".adjust", "audio.json"), "utf8")); } catch { return null; } })();
+        return sendJson(res, 200, { adjust: readAdjust(id), sound: done, original: existsSync(path.join(d, "cut.orig.m4a")) ? `/media/${encodeURIComponent(id)}/cut.orig.m4a` : null,
+          hasEdit: existsSync(path.join(d, "plan.json")), face: existsSync(path.join(d, "face.json")),
+          refs: profiles().map((p) => ({ profile: p.id, name: p.name })) });
+      }
+      if (action === "adjust" && m === "POST" && !seg[4]) {
+        const b = await body(req), cur = readAdjust(id), next: Record<string, any> = { ...cur };
+        const changed = new Set<string>();
+        for (const k of ["audio", "look", "colour", "keyframes", "volume"]) {
+          if (!(k in b)) continue;
+          const v = b[k] && typeof b[k] === "object" && !Array.isArray(b[k]) ? { ...(cur[k] ?? {}), ...b[k] } : b[k];
+          if (JSON.stringify(v) !== JSON.stringify(cur[k])) { next[k] = v; changed.add(k); }
+        }
+        // a new reference, or the look switched on: match it again (adjust.py auto) on the next render
+        if (changed.has("look") && (b.look?.ref || b.look?.on) && !b.look?.wb) { delete next.look.cut; }
+        writeAdjust(id, next);
+        if (changed.has("audio")) void cleanSound(id);
+        else if (["look", "colour", "keyframes", "volume"].some((k) => changed.has(k))) renderSoon(id, "Your changes");
+        broadcast("video", { id });
+        return sendJson(res, 200, { adjust: next, changed: [...changed] });
+      }
+      // copy this video's sound, look and colour to other videos of the profile, or make them its default
+      if (action === "adjust" && m === "POST" && seg[4] === "copy") {
+        const b = await body(req), src = readAdjust(id);
+        const parts = (Array.isArray(b.parts) ? b.parts : ["audio", "look", "colour"]).filter((k: string) => ["audio", "look", "colour"].includes(k));
+        const pick = Object.fromEntries(parts.filter((k: string) => src[k]).map((k: string) => [k, k === "look" ? { on: src.look.on, strength: src.look.strength, ref: src.look.ref } : src[k]]));
+        if (b.to === "default") {
+          const pr = profile();
+          if (!pr) return sendJson(res, 400, { error: "no profile" });
+          const cur = (prof.settings(pr).defaults as Record<string, unknown> | undefined) ?? {};
+          prof.saveSettings(pr, { defaults: { ...cur, ...pick } });
+          return sendJson(res, 200, { ok: true, to: "default" });
+        }
+        const to = (Array.isArray(b.to) ? b.to : []).map(String).filter((x: string) => x !== id && existsSync(lib.editDir(x)));
+        for (const x of to) {
+          const cur = readAdjust(x);
+          writeAdjust(x, { ...cur, ...pick });
+          if (pick.audio) void cleanSound(x);
+          else renderSoon(x, "Copied settings");
+        }
+        return sendJson(res, 200, { ok: true, to });
       }
       if (action === "move" && m === "POST") {   // into another profile: the video, its raw takes and its chat
         const b = await body(req), to = prof.byId(String(b.to ?? "")), from = profileId();

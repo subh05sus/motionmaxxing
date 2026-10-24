@@ -266,9 +266,29 @@ def main():
         for f in (d.resolve() / ".segments").iterdir():
             if f != cache():
                 shutil.rmtree(f, ignore_errors=True)
+        clean_sound(d)
         print(out)
     finally:   # a failed render left 24-66 MB of segments behind on every try
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def clean_sound(d):
+    """The video's studio sound (edit/scripts/audio.py), when its adjust.json has it on: the cut just written carries
+    the original voice; audio.py keeps that as cut.orig.m4a and muxes the cleaned one in. A failure leaves the cut as
+    rendered."""
+    try:
+        if not (json.loads((d / "adjust.json").read_text(encoding="utf-8")).get("audio") or {}).get("on"):
+            return
+    except (OSError, ValueError):
+        return
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+    from mm import progress
+    progress.step("Cleaning up the sound", job="video", key=str(d))
+    home = Path(os.environ.get("MM_HOME", Path.home() / ".motionmaxxing"))
+    vpy = home / "venv" / "bin" / "python"
+    script = Path(__file__).resolve().parents[1].parent / "edit" / "scripts" / "audio.py"
+    r = subprocess.run([str(vpy) if vpy.exists() else sys.executable, str(script), "apply", str(d)], capture_output=True, text=True)
+    print(f"  sound: {(r.stdout or r.stderr).strip().splitlines()[-1] if (r.stdout or r.stderr).strip() else r.returncode}", flush=True)
 
 
 if __name__ == "__main__":

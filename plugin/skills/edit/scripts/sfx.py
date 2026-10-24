@@ -349,14 +349,22 @@ def music(edit_dir, track=None, mood="linear", under_db=None):
     rms = lambda x: float(np.sqrt(np.mean(x ** 2)) or 1e-9)  # noqa: E731
     under = MUSIC_UNDER_DB if under_db is None else abs(under_db)
     bed = bed * 10 ** ((speech_db(cut) - under - db(rms(bed))) / 20)
-    bed = sound.duck(bed, vo, DUCK_DB)
+    try:   # the studio's "Music dips under your voice" switch (adjust.json audio.duck), on unless switched off
+        duck = (json.loads((edit_dir / "adjust.json").read_text(encoding="utf-8")).get("audio") or {}).get("duck", True)
+    except (OSError, ValueError):
+        duck = True
+    if duck:
+        bed = sound.duck(bed, vo, DUCK_DB)
     f = int(min(2.0, length / 5) * sound.SR)
     bed[:, -f:] *= np.linspace(1, 0, f) ** 1.5
     (edit_dir / ".sfx").mkdir(exist_ok=True)
     out = edit_dir / ".sfx" / "music.wav"
     sound.write_wav(out, bed)
+    # how it was made, so `music <edit> --again` (the studio, after the switch or the voice changed) makes it the same way
+    (edit_dir / ".sfx" / "music.json").write_text(json.dumps({"track": str(track) if track else None, "mood": mood,
+                                                               "under_db": under_db}), encoding="utf-8")
     print(f"{out}: {'track ' + str(track) if track else 'generated (' + mood + ')'}, {under} dB under the speech, "
-          f"{-DUCK_DB} dB more under each word")
+          + (f"{-DUCK_DB} dB more under each word" if duck else "no dip under the words"))
     return out
 
 
@@ -373,7 +381,16 @@ if __name__ == "__main__":
         ap.add_argument("--track", help="a file in the edit folder, e.g. audio/track.wav (product.py music)")
         ap.add_argument("--mood", default="linear", help="the generated bed's mood (product-video sound.py MOODS)")
         ap.add_argument("--under-db", type=float, help=f"dB under the speech (default: the creator's sound.music.level_db, else {MUSIC_UNDER_DB})")
+        ap.add_argument("--again", action="store_true", help="the way it was made last time (.sfx/music.json); nothing when there is no bed")
         a = ap.parse_args()
+        if a.again:
+            if not (Path(a.edit) / ".sfx" / "music.wav").exists():
+                sys.exit(0)   # no bed in this edit: nothing to make again
+            try:
+                last = json.loads((Path(a.edit) / ".sfx" / "music.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                last = {}
+            a.track, a.mood, a.under_db = last.get("track"), last.get("mood") or "linear", last.get("under_db")
         st = Path(a.edit) / "style.json"
         lvl = a.under_db
         if lvl is None and st.exists():

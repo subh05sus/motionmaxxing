@@ -292,6 +292,54 @@ def ref_video(ref):
     sys.exit(f"ERROR: {ref} has no cut.mp4 and face.json to measure")
 
 
+def ref_edit(ref, edit):
+    """The edit folder a look's reference names: {"edit": path}, or {"profile": id}: that profile's newest video with
+    a cut and a face track (the profile's own light, as its reels show it)."""
+    if not ref:
+        return None
+    if ref.get("edit") and (Path(ref["edit"]) / "face.json").exists():
+        return Path(ref["edit"])
+    if ref.get("profile"):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
+        from mm import library, profiles
+        f = profiles.folder(library.root(make=False), ref["profile"])
+        if f:
+            cands = [d for d in (f / "edits").glob("*") if (d / "cut.mp4").exists() and (d / "face.json").exists()
+                     and d.resolve() != Path(edit).resolve()]
+            if cands:
+                return max(cands, key=lambda d: (d / "cut.mp4").stat().st_mtime)
+    return None
+
+
+def auto(edit):
+    """When the look is on and not matched to this cut yet (or the cut changed since): measure and match it now.
+    edit.py runs this before it prepares a render. -> what happened."""
+    edit = Path(edit)
+    d = load(edit)
+    lk = d.get("look") or {}
+    if not lk.get("on"):
+        return "look off"
+    cut, face = edit / "cut.mp4", edit / "face.json"
+    if not cut.exists() or not face.exists():
+        return "no cut or face track yet"
+    stamp = f"{cut.stat().st_size}|{cut.stat().st_mtime_ns}"
+    if lk.get("wb") and lk.get("cut") == stamp:
+        return "matched"
+    r = ref_edit(lk.get("ref"), edit)
+    if not r:
+        return "no reference to match"
+    src, ref = measure(cut, face), measure(*ref_video(r))
+    keep = {k: lk[k] for k in ("strength", "ref", "face_light_set", "background_set") if k in lk}
+    new = {**match(src, ref), **keep, "cut": stamp, "measured": {"video": src, "ref": ref, "ref_edit": str(r)}}
+    # what the user set by hand outranks the match
+    for k in ("face_light", "background"):
+        if lk.get(f"{k}_set"):
+            new[k] = lk[k]
+    d["look"] = new
+    save(edit, d)
+    return "matched to " + r.name
+
+
 def demo():
     import tempfile
     import numpy as np
@@ -334,7 +382,7 @@ def demo():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["match", "stills", "measure", "mask", "demo"])
+    ap.add_argument("cmd", choices=["match", "stills", "measure", "mask", "auto", "demo"])
     ap.add_argument("target", nargs="?")
     ap.add_argument("--ref")
     ap.add_argument("--face")
@@ -352,6 +400,9 @@ def main():
         print(json.dumps(measure(v, a.face or v.parent / "face.json"), indent=1))
         return
     edit = Path(a.target)
+    if a.cmd == "auto":
+        print(auto(edit))
+        return
     if a.cmd == "mask":   # edit.py prepare_public: the face light for the render's footage copy and the cutouts
         w, h = (int(x) for x in a.size.split("x"))
         write_mask(edit / "face.json", a.out, w, h, a.fps, a.frames)

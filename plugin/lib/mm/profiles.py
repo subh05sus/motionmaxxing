@@ -35,7 +35,8 @@ from pathlib import Path
 
 FILE = "profiles.json"
 # a profile's own settings in its profile.json; everything else in profile.json stays shared ($MM_HOME/profile.json)
-OWN_KEYS = ("lang", "brand", "names", "handles", "export_dir", "creators", "liked_videos", "audience", "goal", "cta")
+OWN_KEYS = ("lang", "brand", "names", "handles", "export_dir", "creators", "liked_videos", "audience", "goal", "cta",
+            "defaults")   # defaults: what every new video starts with (its audio and look: adjust.json)
 SUBDIRS = ("edits", "videos", "scripts", "creator-teardowns", "attachments", "Exports")
 COLORS = ("#E5482C", "#4F7CFF", "#2FB37F", "#B15CFF", "#F2A33A", "#16A9C9")
 # the library's own folders (shared, or a library from before profiles): never a profile's folder name
